@@ -19,12 +19,13 @@ object PrayerTimesCalculator {
     fun calculate(
         latitude: Double,
         longitude: Double,
+        dstOffsetHours: Double = 0.0,
         calendar: Calendar = Calendar.getInstance()
     ): PrayerTimesList {
         val dayOfYear = calendar.get(Calendar.DAY_OF_YEAR)
         // Calculate the standard timezone for this longitude to display localized times correctly
         // (e.g. Mecca longitude approx 39.8 -> GMT+3) instead of using the emulator's host timezone (e.g. UTC/PST cloud runner)
-        val timezone = Math.round(longitude / 15.0).toDouble()
+        val timezone = Math.round(longitude / 15.0).toDouble() + dstOffsetHours
 
         // Mathematical conversion to angles
         val d = dayOfYear.toDouble()

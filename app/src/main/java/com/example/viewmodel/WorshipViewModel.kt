@@ -116,7 +116,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         if (currentSettings.isAutoLocation) {
             PrayerTimesCalculator.calculate(
                 currentSettings.latitude,
-                currentSettings.longitude
+                currentSettings.longitude,
+                currentSettings.dstOffsetHours.toDouble()
             )
         } else {
             PrayerTimesCalculator.PrayerTimesList(
@@ -430,6 +431,14 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             )
             currentList.add(newMember)
             repository.insertFamilyMembers(currentList)
+        }
+    }
+
+    // Update DST Offset
+    fun updateDstOffset(offsetHours: Int) {
+        viewModelScope.launch {
+            val updated = settings.value.copy(dstOffsetHours = offsetHours)
+            repository.saveSettings(updated)
         }
     }
 

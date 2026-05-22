@@ -94,6 +94,7 @@ data class AppSettings(
     val manualMaghrib: String = "06:50 م",
     val manualIsha: String = "08:20 م",
     val isAdhanSoundEnabled: Boolean = true,
+    val dstOffsetHours: Int = 0,
     val selectedReciter: String = "الشيخ عبد الباسط",
     
     // Additional Customization Features
@@ -165,7 +166,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {

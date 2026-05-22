@@ -1476,59 +1476,50 @@ fun FamilyScreen(
 
         // Beautiful Google Accounts simulation sheet / dialog
         if (showGoogleAuthDialog) {
+            var inputName by remember { mutableStateOf("") }
+            var inputEmail by remember { mutableStateOf("") }
             AlertDialog(
                 onDismissRequest = { showGoogleAuthDialog = false },
-                title = { Text("اختر حسابًا للمتابعة لـ زاد", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                title = { Text("تسجيل الدخول", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "سيقوم تطبيق زاد بالوصول لملفك الشخصي ونظام الغيميات السحابي الآمن لتسجيل الدخول:",
+                            text = "أدخل بياناتك للمتابعة والتسجيل في منصة زاد:",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        
-                        // Active user metadata-driven account
-                        Card(
-                            onClick = {
+                        OutlinedTextField(
+                            value = inputName,
+                            onValueChange = { inputName = it },
+                            label = { Text("الاسم") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = inputEmail,
+                            onValueChange = { inputEmail = it },
+                            label = { Text("البريد الإلكتروني") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (inputName.isNotBlank() && inputEmail.isNotBlank()) {
                                 viewModel.signInWithGoogle(
-                                    id = "medoo51195",
-                                    name = "محمد البدري",
-                                    email = "medoo51195@gmail.com",
+                                    id = inputEmail.hashCode().toString(),
+                                    name = inputName,
+                                    email = inputEmail,
                                     avatar = "avatar1"
                                 )
                                 showGoogleAuthDialog = false
-                            },
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF4285F4)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("م", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text("محمد البدري (أنت)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                    Text("medoo51195@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                                }
                             }
                         }
-
+                    ) {
+                        Text("متابعة")
                     }
                 },
-                confirmButton = {},
                 dismissButton = {
                     TextButton(onClick = { showGoogleAuthDialog = false }) {
                         Text("إلغاء المتابعة")
@@ -2317,6 +2308,34 @@ fun SettingsScreen(
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "التوقيت (صيفي / شتوي):",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.updateDstOffset(0) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (settings.dstOffsetHours == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (settings.dstOffsetHours == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text("توقيت شتوي")
+                        }
+                        Button(
+                            onClick = { viewModel.updateDstOffset(1) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (settings.dstOffsetHours == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (settings.dstOffsetHours == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            Text("توقيت صيفي")
+                        }
+                    }
                 }
             }
         }
@@ -3012,63 +3031,55 @@ fun AppWideWelcomeLoginScreen(
 
     // Google Sign-In Interactive Simulation Dialog
     if (showGoogleAuthDialog) {
+        var inputName by remember { mutableStateOf("") }
+        var inputEmail by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showGoogleAuthDialog = false },
-            title = { Text("اختر حسابًا للمتابعة لـ زاد", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            title = { Text("تسجيل الدخول", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "سيقوم تطبيق زاد بالوصول لملفك الشخصي ونظام الغيميات السحابي الآمن لتسجيل الدخول:",
+                        text = "أدخل بياناتك للمتابعة والتسجيل في منصة زاد:",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Gray
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-
-                    // Account Option 1 (Default Google Account)
-                    Card(
-                        onClick = {
-                            viewModel.signInWithGoogle(
-                                id = "medoo51195",
-                                name = "أحمد الدقميري",
-                                email = "medoo51195@gmail.com",
-                                avatar = "avatar1"
-                            )
-                            showGoogleAuthDialog = false
-                        },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF4285F4)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("أ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("أحمد الدقميري (أنت)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                Text("medoo51195@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                            }
-                        }
-                    }
+                    OutlinedTextField(
+                        value = inputName,
+                        onValueChange = { inputName = it },
+                        label = { Text("الاسم") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = inputEmail,
+                        onValueChange = { inputEmail = it },
+                        label = { Text("البريد الإلكتروني") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = { 
+                Button(
+                    onClick = {
+                        if (inputName.isNotBlank() && inputEmail.isNotBlank()) {
+                            viewModel.signInWithGoogle(
+                                id = inputEmail.hashCode().toString(),
+                                name = inputName,
+                                email = inputEmail,
+                                avatar = "avatar1"
+                            )
+                            showGoogleAuthDialog = false
+                        }
+                    }
+                ) {
+                    Text("متابعة", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
                 TextButton(onClick = { showGoogleAuthDialog = false }) {
                     Text("رجوع", fontWeight = FontWeight.Bold)
                 }
-            },
-            dismissButton = null
+            }
         )
     }
 }
