@@ -96,8 +96,19 @@ data class AppSettings(
     
     // Additional Customization Features
     val appFontSizeMultiplier: String = "متوسط", // "صغير", "متوسط", "كبير"
+    val isDarkMode: Boolean = true,             // App-wide dark mode
     val quranQuartersCount: Int = 0,             // Quran quarters read
-    val favoriteSupplicationsJson: String = ""    // Comma separated supplications
+    val favoriteSupplicationsJson: String = "",   // Comma separated supplications
+
+    // Google Sign-In Integration
+    val isGoogleSignedIn: Boolean = false,
+    val googleUserName: String = "",
+    val googleUserEmail: String = "",
+    val googleUserAvatarUrl: String = "",
+
+    // Family Group Space Integration
+    val familyGroupName: String = "",
+    val familyGroupInviteCode: String = ""
 )
 
 @Dao
@@ -147,7 +158,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 2,
+    version = 5,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {

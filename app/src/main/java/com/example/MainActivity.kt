@@ -2,8 +2,11 @@ package com.example
 
 import android.os.Bundle
 import android.widget.Toast
+import android.Manifest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.*
@@ -61,8 +64,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                val settingsState by viewModel.settings.collectAsStateWithLifecycle()
+            val settingsState by viewModel.settings.collectAsStateWithLifecycle()
+            MyApplicationTheme(darkTheme = settingsState.isDarkMode) {
                 val fontScale = when (settingsState.appFontSizeMultiplier) {
                     "صغير" -> 0.85f
                     "كبير" -> 1.25f
@@ -81,10 +84,18 @@ class MainActivity : ComponentActivity() {
                     Scaffold(
                         modifier = Modifier.fillMaxSize()
                     ) { innerPadding ->
-                        MainZadContainer(
-                            viewModel = viewModel,
-                            modifier = Modifier.padding(innerPadding)
-                        )
+                        if (!settingsState.isGoogleSignedIn) {
+                            AppWideWelcomeLoginScreen(
+                                viewModel = viewModel,
+                                settings = settingsState,
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        } else {
+                            MainZadContainer(
+                                viewModel = viewModel,
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        }
                     }
                 }
             }
@@ -121,7 +132,7 @@ fun MainZadContainer(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = if (MaterialTheme.colorScheme.background == Color(0xFF061512) || MaterialTheme.colorScheme.background == Color(0xFF090D16)) {
+                    colors = if (settingsState.isDarkMode) {
                         listOf(Color(0xFF0D2D26), Color(0xFF061512))
                     } else {
                         listOf(Color(0xFFECFDF5), Color(0xFFF0FDF4))
@@ -130,7 +141,11 @@ fun MainZadContainer(
             )
     ) {
         // App Header: Islamic Date & Dynamic clock widget
-        ZadHeader(settings = settingsState)
+        ZadHeader(
+            settings = settingsState,
+            viewModel = viewModel,
+            onTabSelected = { currentTab = it }
+        )
 
         // Screen Content with Animated Content transitions
         Box(
@@ -180,83 +195,177 @@ fun MainZadContainer(
 }
 
 @Composable
-fun ZadHeader(settings: AppSettings) {
-    val sdfTime = SimpleDateFormat("hh:mm a", Locale("ar"))
-    val sdfDateStr = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale("ar"))
-    var currentTimeStr by remember { mutableStateOf(sdfTime.format(Date())) }
-    val todayDateStr = sdfDateStr.format(Date())
+fun ZadHeader(
+    settings: AppSettings,
+    viewModel: WorshipViewModel,
+    onTabSelected: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val sdfDateStr = SimpleDateFormat("EEEE، d MMMM", Locale("ar"))
+    val todayDateStr = "اليوم، " + sdfDateStr.format(Date())
 
-    // Update clock every minute
-    LaunchedEffect(key1 = true) {
-        while (true) {
-            currentTimeStr = sdfTime.format(Date())
-            kotlinx.coroutines.delay(1000 * 30) // 30 sec
-        }
-    }
+    val isDark = settings.isDarkMode
 
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (MaterialTheme.colorScheme.background == Color(0xFF061512)) {
-                Color.White.copy(alpha = 0.05f)
-            } else {
-                MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-            }
-        ),
-        border = if (MaterialTheme.colorScheme.background == Color(0xFF061512)) {
-            BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-        } else {
-            null
-        },
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = RoundedCornerShape(24.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Left Column: 4 Circular Buttons + Welcome user
+        Column(
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column {
-                Text(
-                    text = "منصة زاد الروحية",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Button 1: Refresh Location
+                HeaderActionButton(
+                    icon = Icons.Default.Refresh,
+                    contentDescription = "تحديث الموقع",
+                    isDark = isDark,
+                    onClick = {
+                        viewModel.fetchAndSaveRealLocation(context)
+                    }
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.LocationOn,
-                        contentDescription = "الموقع",
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = settings.locationName + if (settings.isAutoLocation) " (تلقائي)" else " (يدوي)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
-                    )
-                }
+
+                // Button 2: Alert Sound Experience
+                HeaderActionButton(
+                    icon = Icons.Default.Notifications,
+                    contentDescription = "تجربة التنبيه والآذان",
+                    isDark = isDark,
+                    onClick = {
+                        viewModel.unlockAudioAndPlayPreview()
+                    }
+                )
+
+                // Button 3: Go to settings
+                HeaderActionButton(
+                    icon = Icons.Default.Settings,
+                    contentDescription = "الإعدادات السريعة",
+                    isDark = isDark,
+                    onClick = {
+                        onTabSelected("settings")
+                    }
+                )
+
+                // Button 4: Sun/Moon Theme Toggle
+                HeaderActionButton(
+                    emoji = if (isDark) "☀️" else "🌙",
+                    contentDescription = if (isDark) "تفعيل الوضع المضيء" else "تفعيل الوضع المظلم",
+                    isDark = isDark,
+                    onClick = {
+                        viewModel.toggleDarkMode(!isDark)
+                    }
+                )
             }
 
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = currentTimeStr,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary
+            // Welcome Text
+            val welcomeText = if (settings.isGoogleSignedIn && settings.googleUserName.isNotEmpty()) {
+                settings.googleUserName
+            } else {
+                "أحمد الدقميري"
+            }
+            Text(
+                text = "مرحبًا، $welcomeText",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White.copy(alpha = 0.9f) else Color(0xFF064E3B)
+            )
+        }
+
+        // Right Column: Brand Name & Date
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "زاد",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                color = if (isDark) Color.White else Color(0xFF047857),
+                fontSize = 32.sp
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowLeft,
+                    contentDescription = null,
+                    tint = if (isDark) Color.White.copy(alpha = 0.4f) else Color(0xFF047857).copy(alpha = 0.4f),
+                    modifier = Modifier.size(14.dp)
                 )
                 Text(
                     text = todayDateStr,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF064E3B).copy(alpha = 0.7f)
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = if (isDark) Color.White.copy(alpha = 0.4f) else Color(0xFF047857).copy(alpha = 0.4f),
+                    modifier = Modifier.size(14.dp)
                 )
             }
+
+            Text(
+                text = "مواقيت الصلاة\nتلقائي حسب الموقع",
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.End,
+                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray.copy(alpha = 0.8f),
+                lineHeight = 12.sp,
+                fontSize = 10.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun HeaderActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    emoji: String? = null,
+    contentDescription: String,
+    isDark: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(
+                if (isDark) Color.White.copy(alpha = 0.08f)
+                else Color(0xFF047857).copy(alpha = 0.08f)
+            )
+            .border(
+                1.dp,
+                if (isDark) Color.White.copy(alpha = 0.15f)
+                else Color(0xFF047857).copy(alpha = 0.15f),
+                CircleShape
+            )
+            .clickable(
+                onClick = onClick,
+                role = androidx.compose.ui.semantics.Role.Button
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = if (isDark) Color.White else Color(0xFF047857),
+                modifier = Modifier.size(20.dp)
+            )
+        } else if (emoji != null) {
+            Text(
+                text = emoji,
+                fontSize = 18.sp,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
@@ -900,90 +1009,472 @@ fun FamilyScreen(
     familyList: List<FamilyMember>,
     viewModel: WorshipViewModel
 ) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    var showGoogleAuthDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
     var newMemberName by remember { mutableStateOf("") }
     var newMemberRelation by remember { mutableStateOf("صديق(ة)") }
 
+    var groupCreationName by remember { mutableStateOf("") }
+    var groupInviteCodeToJoin by remember { mutableStateOf("") }
+
+    val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
+
     Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item {
-                val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isDark) Color(0xFF10B981).copy(alpha = 0.08f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
-                    ),
-                    border = if (isDark) BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.2f)) else null,
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "👥 شبكة \"الأهل والأصدقاء\"",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "شارِك التزامك اليومي وتسابق في الخيرات، تواصل مع عائلتك وشجّعهم بإرسال التفاعلات والقلوب اللحظية الروحية.",
-                            style = MaterialTheme.typography.bodySmall,
-                            lineHeight = 18.sp,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-            }
-
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "جدول تقدم أفراد العائلة:",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    Button(
-                        onClick = { showJoinDialog = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("إضافة فرد", fontSize = 12.sp)
-                    }
-                }
-            }
-
-            if (familyList.isEmpty()) {
+        if (!settings.isGoogleSignedIn) {
+            // Google Sign-In Required Screen
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 item {
-                    Box(
+                    Spacer(modifier = Modifier.height(60.dp))
+                    Text(
+                        text = "👥 شبكة \"الأهل والأسرة مشتركة\"",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isDark) Color(0xFF10B981).copy(alpha = 0.08f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f)
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "تسجيل الدخول عبر Google مطلوب 🔑",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "انضم إلينا لتتمكن من إنشاء مجموعات الأهل، دعوتهم لمتابعة التقدم اليومي وتحفيز بعضكم البعض بإرسال قلوب الدعم الروحي والتفاعلات المباشرة بشكل آمن وسلس.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 22.sp,
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(30.dp))
+                    
+                    // Styled Google Sign-In Button
+                    Button(
+                        onClick = { showGoogleAuthDialog = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        border = BorderStroke(1.dp, Color.LightGray),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(32.dp),
-                        contentAlignment = Alignment.Center
+                            .height(54.dp)
+                            .testTag("google_signin_button")
                     ) {
-                        Text("لا يوجد أفراد آخرين في دائرتك الحالية.", color = Color.Gray)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Custom high-fidelity Google G Vector Letter Draw
+                            Text(
+                                text = "G ", 
+                                style = MaterialTheme.typography.titleMedium, 
+                                fontWeight = FontWeight.Bold, 
+                                color = Color(0xFF4285F4)
+                            )
+                            Text(
+                                text = "تسجيل الدخول الآمن بحساب Google",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
-            } else {
-                items(familyList) { member ->
-                    FamilyMemberItemCard(member = member, onLikeClick = { viewModel.likeFamilyMember(member.id) })
-                }
             }
+        } else {
+            // Signed In Family Circle view
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // User Google Profile Card
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = settings.googleUserName.take(1).uppercase(),
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = settings.googleUserName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = settings.googleUserEmail,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                            
+                            OutlinedButton(
+                                onClick = { viewModel.signOutGoogle() },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                                border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.3f))
+                            ) {
+                                Text("خروج", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
 
-            item { Spacer(modifier = Modifier.height(30.dp)) }
+                // If NOT in Family Group: Join or Create
+                if (settings.familyGroupName.isEmpty()) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "🆕 إنشاء مجموعة عائلية جديدة",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "سيتيح لك هذا إنشاء كود دعوة خاص بك لترسله لبقية الأهل لينضموا لشبكتكم المشتركة.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray,
+                                    lineHeight = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                OutlinedTextField(
+                                    value = groupCreationName,
+                                    onValueChange = { groupCreationName = it },
+                                    label = { Text("اسم العائلة (مثال: عائلة المهتدي)", fontSize = 12.sp) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        if (groupCreationName.isNotBlank()) {
+                                            viewModel.createFamilyGroup(groupCreationName)
+                                            groupCreationName = ""
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("إنشاء المجموعة وتوليد رمز الدعوة 👥", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "📥 الانضمام لمجموعة عائلية عبر كود دعوة",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "أدخل رمز الدعوة المكون من 8 خانات (مثال: ZAD-1234) الذي تم توليده بواسطة فرد عائلتك للاندماج معه.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray,
+                                    lineHeight = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                OutlinedTextField(
+                                    value = groupInviteCodeToJoin,
+                                    onValueChange = { groupInviteCodeToJoin = it },
+                                    label = { Text("رمز الدعوة (ZAD-XXXX)", fontSize = 12.sp) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        if (groupInviteCodeToJoin.isNotBlank()) {
+                                            viewModel.joinFamilyGroup(groupInviteCodeToJoin)
+                                            groupInviteCodeToJoin = ""
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("انضمام للمجموعة الآن 🟢", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Signed In AND has family group joined
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isDark) Color(0xFF10B981).copy(alpha = 0.08f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
+                            ),
+                            border = if (isDark) BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.2f)) else null,
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "👪 مجموعة: ${settings.familyGroupName}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.primaryContainer)
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = settings.familyGroupInviteCode,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "كود الدعوة بالأعلى جاهز لترسله للأهل. شارك التزامك اليومي وتسابق في الطاعات بكل بهجة وتواصل لحظي.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    lineHeight = 18.sp,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "مستوى التزام دائرتك الحالية:",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            Button(
+                                onClick = { showJoinDialog = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("إضافة فرد", fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    if (familyList.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("لا يوجد أعضاء آخرين في المجموعة العائلية، ابدأ بإضافة فرد يدويًا أو شارك الرمز.", color = Color.Gray, fontSize = 13.sp)
+                            }
+                        }
+                    } else {
+                        items(familyList) { member ->
+                            FamilyMemberItemCard(member = member, onLikeClick = { viewModel.likeFamilyMember(member.id) })
+                        }
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(20.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.leaveFamilyGroup() },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.4f))
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("مغادرة المجموعة العائلية ودائرتها 👥", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                item { Spacer(modifier = Modifier.height(30.dp)) }
+            }
+        }
+
+        // Beautiful Google Accounts simulation sheet / dialog
+        if (showGoogleAuthDialog) {
+            AlertDialog(
+                onDismissRequest = { showGoogleAuthDialog = false },
+                title = { Text("اختر حسابًا للمتابعة لـ زاد", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "سيقوم تطبيق زاد بالوصول لملفك الشخصي ونظام الغيميات السحابي الآمن لتسجيل الدخول:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        // Active user metadata-driven account
+                        Card(
+                            onClick = {
+                                viewModel.signInWithGoogle(
+                                    name = "محمد البدري",
+                                    email = "medoo51195@gmail.com",
+                                    avatar = "avatar1"
+                                )
+                                showGoogleAuthDialog = false
+                            },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF4285F4)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("م", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text("محمد البدري (أنت)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                    Text("medoo51195@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                }
+                            }
+                        }
+
+                        // Guest account
+                        Card(
+                            onClick = {
+                                viewModel.signInWithGoogle(
+                                    name = "عبد الله الروحاني",
+                                    email = "worshipper.zad@gmail.com",
+                                    avatar = "avatar2"
+                                )
+                                showGoogleAuthDialog = false
+                            },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF34A853)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("ع", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text("عبد الله الروحاني", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                    Text("worshipper.zad@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showGoogleAuthDialog = false }) {
+                        Text("إلغاء المتابعة")
+                    }
+                }
+            )
         }
 
         // Add Member Dialog
@@ -1639,6 +2130,19 @@ fun SettingsScreen(
     reminders: List<CustomReminder>,
     viewModel: WorshipViewModel
 ) {
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            viewModel.fetchAndSaveRealLocation(context)
+        } else {
+            Toast.makeText(context, "لم يتم منح صلاحية الموقع الجغرافي.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     var showAddReminderDialog by remember { mutableStateOf(false) }
 
     // Forms for setting inputs
@@ -1683,8 +2187,12 @@ fun SettingsScreen(
                             checked = settings.isAutoLocation,
                             onCheckedChange = { isAuto ->
                                 if (isAuto) {
-                                    // Use default Mecca
-                                    viewModel.updateLocationSettings(true, 21.4225, 39.8262, "مكة المكرمة")
+                                    permissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
                                 } else {
                                     viewModel.updateLocationSettings(false, 30.0444, 31.2357, "القاهرة")
                                 }
@@ -1693,6 +2201,30 @@ fun SettingsScreen(
                                 checkedThumbColor = MaterialTheme.colorScheme.primary
                             )
                         )
+                    }
+
+                    if (settings.isAutoLocation) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                permissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                contentColor = MaterialTheme.colorScheme.primary
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("تحديث الموقع الفعلي الآن 📍", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
 
                     if (!settings.isAutoLocation) {
@@ -2175,4 +2707,282 @@ fun ZadBottomNavBar(
         }
     }
 }
+}
+
+@Composable
+fun AppWideWelcomeLoginScreen(
+    viewModel: WorshipViewModel,
+    settings: AppSettings,
+    modifier: Modifier = Modifier
+) {
+    var showGoogleAuthDialog by remember { mutableStateOf(false) }
+    val isDark = settings.isDarkMode
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = if (isDark) {
+                        listOf(Color(0xFF0D2D26), Color(0xFF061512))
+                    } else {
+                        listOf(Color(0xFFECFDF5), Color(0xFFF0FDF4))
+                    }
+                )
+            )
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Top Bar on Login Screen for Theme Toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "مرحبًا بك في منصة زاد الروحية ✨",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isDark) Color.White.copy(alpha = 0.6f) else Color(0xFF064E3B).copy(alpha = 0.6f)
+            )
+            
+            HeaderActionButton(
+                emoji = if (isDark) "☀️" else "🌙",
+                contentDescription = if (isDark) "الوضع المضيء" else "الوضع المظلم",
+                isDark = isDark,
+                onClick = {
+                    viewModel.toggleDarkMode(!isDark)
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
+
+        // Large Brand Logo "زاد"
+        Text(
+            text = "زاد",
+            style = MaterialTheme.typography.displayLarge,
+            fontWeight = FontWeight.Black,
+            color = if (isDark) Color.White else Color(0xFF047857),
+            fontSize = 72.sp
+        )
+        Text(
+            text = "رفيق المسلم اليومي للعبادات والطاعة",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Features list
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                LoginFeatureCard(
+                    title = "🕌 مواقيت الصلاة والآذان بدقة",
+                    description = "تنبيهات ومواقيت صلاة تتبع موقعك الفعلي بدقة متناهية مع خيار ضبط يدوي ملائم.",
+                    isDark = isDark
+                )
+            }
+            item {
+                LoginFeatureCard(
+                    title = "👥 دائرة الأهل والأسرة الروحية",
+                    description = "شارك عباداتك مع عائلتك بشكل تفاعلي، لتتبادلوا التشجيع والإعجاب بالطاعات اليومية.",
+                    isDark = isDark
+                )
+            }
+            item {
+                LoginFeatureCard(
+                    title = "📊 سجل الإنجازات والالتزام الروحاني",
+                    description = "إحصائيات ذكية ونسب مئوية تعرض تقدمك اليومي وتذكرك بالسنن الرواتب بدقة.",
+                    isDark = isDark
+                )
+            }
+            item {
+                LoginFeatureCard(
+                    title = "📖 الورد القرآني وأذكار اليوم",
+                    description = "تلاوة القرآن الكريم وأذكار الصباح والمساء المأثورة مجمعة في شاشة واحدة.",
+                    isDark = isDark
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Google Sign-In Button
+        Button(
+            onClick = { showGoogleAuthDialog = true },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            border = BorderStroke(1.dp, Color.LightGray),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .testTag("google_signin_button")
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "G ",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4285F4)
+                )
+                Text(
+                    text = "تسجيل الدخول الآمن بحساب Google",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = "بالضغط على تسجيل الدخول فإنك تنضم لدائرة طاعة تفاعلية آمنة",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            textAlign = TextAlign.Center
+        )
+    }
+
+    // Google Sign-In Interactive Simulation Dialog
+    if (showGoogleAuthDialog) {
+        AlertDialog(
+            onDismissRequest = { showGoogleAuthDialog = false },
+            title = { Text("اختر حسابًا للمتابعة لـ زاد", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "سيقوم تطبيق زاد بالوصول لملفك الشخصي ونظام الغيميات السحابي الآمن لتسجيل الدخول:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Account Option 1 (Default Google Account)
+                    Card(
+                        onClick = {
+                            viewModel.signInWithGoogle(
+                                name = "أحمد الدقميري",
+                                email = "medoo51195@gmail.com",
+                                avatar = "avatar1"
+                            )
+                            showGoogleAuthDialog = false
+                        },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4285F4)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("أ", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("أحمد الدقميري (أنت)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                Text("medoo51195@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            }
+                        }
+                    }
+
+                    // Account Option 2 (Guest Developer Account)
+                    Card(
+                        onClick = {
+                            viewModel.signInWithGoogle(
+                                name = "عبد الله الروحاني",
+                                email = "worshipper.zad@gmail.com",
+                                avatar = "avatar2"
+                            )
+                            showGoogleAuthDialog = false
+                        },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF047857)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("ع", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("عبد الله الروحاني", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                Text("worshipper.zad@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showGoogleAuthDialog = false }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun LoginFeatureCard(
+    title: String,
+    description: String,
+    isDark: Boolean
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDark) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.8f)
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isDark) Color.White.copy(alpha = 0.06f) else Color(0xFF047857).copy(alpha = 0.1f)
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color(0xFF10B981) else Color(0xFF047857)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isDark) Color.White.copy(alpha = 0.7f) else Color.DarkGray
+            )
+        }
+    }
 }

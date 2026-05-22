@@ -16,6 +16,9 @@ import com.example.data.PrayerTimesCalculator
 import com.example.data.WorshipDatabase
 import com.example.data.WorshipProgress
 import com.example.data.WorshipRepository
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import android.annotation.SuppressLint
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -413,6 +416,158 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    // Google Sign-In Integration Methods
+    fun signInWithGoogle(name: String, email: String, avatar: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val updated = currentSet.copy(
+                isGoogleSignedIn = true,
+                googleUserName = name,
+                googleUserEmail = email,
+                googleUserAvatarUrl = avatar
+            )
+            repository.saveSettings(updated)
+            _notificationFlow.emit("مرحبًا بك يا $name! تم تسجيل الدخول بنجاح عبر Google. 🟢")
+        }
+    }
+
+    fun signOutGoogle() {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val updated = currentSet.copy(
+                isGoogleSignedIn = false,
+                googleUserName = "",
+                googleUserEmail = "",
+                googleUserAvatarUrl = "",
+                familyGroupName = "",
+                familyGroupInviteCode = ""
+            )
+            repository.saveSettings(updated)
+            repository.insertFamilyMembers(emptyList()) // Clean list when signing out
+            _notificationFlow.emit("تم تسجيل الخروج من حساب Google بنجاح. 👋")
+        }
+    }
+
+    // Family Group Space Integration Methods
+    fun createFamilyGroup(groupName: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val randomCode = "ZAD-${(1000..9999).random()}"
+            val updated = currentSet.copy(
+                familyGroupName = groupName,
+                familyGroupInviteCode = randomCode
+            )
+            repository.saveSettings(updated)
+            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
+            
+            // Seed group members under the new family space
+            val newFamily = listOf(
+                FamilyMember(1, "أحمد (الأخ)", "الأخ", "avatar1", 88f, 12, false, "صلاة العصر"),
+                FamilyMember(2, "أميرة (الوالدة)", "الأم", "avatar2", 100f, 34, false, "الورد اليومي"),
+                FamilyMember(3, "محمد (الأب)", "الأب", "avatar3", 77f, 9, false, "أذكار الصباح"),
+                FamilyMember(4, "فاطمة (الأخت)", "الأخت", "avatar4", 55f, 15, false, "صلاة الظهر")
+            )
+            repository.insertFamilyMembers(newFamily)
+        }
+    }
+
+    fun joinFamilyGroup(inviteCode: String) {
+        viewModelScope.launch {
+            val trimmedCode = inviteCode.trim().uppercase()
+            if (trimmedCode.startsWith("ZAD-") && trimmedCode.length == 8) {
+                val currentSet = settings.value
+                val groupName = when ((trimmedCode.takeLast(4).toIntOrNull() ?: 1) % 3) {
+                    0 -> "عائلة الهاشمي"
+                    1 -> "عائلة المنصوري"
+                    else -> "دائرة الأهل الروحية"
+                }
+                val updated = currentSet.copy(
+                    familyGroupName = groupName,
+                    familyGroupInviteCode = trimmedCode
+                )
+                repository.saveSettings(updated)
+                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
+                
+                // Seed some unique members for this code
+                val joinedFamily = listOf(
+                    FamilyMember(1, "عمر (ابن العم)", "ابن عم", "avatar1", 92f, 21, false, "صلاة الفجر"),
+                    FamilyMember(2, "سارة (الخالة)", "خالة", "avatar2", 85f, 40, false, "الورد اليومي"),
+                    FamilyMember(3, "خالد (الخال)", "خال", "avatar3", 60f, 18, false, "أذكار المساء")
+                )
+                repository.insertFamilyMembers(joinedFamily)
+            } else {
+                _notificationFlow.emit("كود الدعوة غير صالح! الرجاء إدخال كود بالصيغة ZAD-XXXX ❌")
+            }
+        }
+    }
+
+    fun leaveFamilyGroup() {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val updated = currentSet.copy(
+                familyGroupName = "",
+                familyGroupInviteCode = ""
+            )
+            repository.saveSettings(updated)
+            repository.insertFamilyMembers(emptyList()) // clear current family circle members
+            _notificationFlow.emit("تم مغادرة المجموعة العائلية. 👥")
+        }
+    }
+
+    // Real GPS location retrieval
+    @SuppressLint("MissingPermission")
+    fun fetchAndSaveRealLocation(context: Context) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                
+                // Try retrieving the last location first
+                var location: android.location.Location? = null
+                try {
+                    location = fusedLocationClient.lastLocation.await()
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                }
+
+                // If last location was null, requests the current live location
+                if (location == null) {
+                    try {
+                        location = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+                    } catch (e: Throwable) {
+                        e.printStackTrace()
+                    }
+                }
+
+                if (location != null) {
+                    val lat = location.latitude
+                    val lon = location.longitude
+                    val geocoder = android.location.Geocoder(context, Locale("ar"))
+                    var name = "موقعك الفعلي"
+                    try {
+                        val addresses = geocoder.getFromLocation(lat, lon, 1)
+                        if (!addresses.isNullOrEmpty()) {
+                            val address = addresses[0]
+                            name = address.locality ?: address.subAdminArea ?: address.adminArea ?: "موقعك الفعلي"
+                        }
+                    } catch (e: Throwable) {
+                        name = "موقعك الفعلي (${String.format(Locale.US, "%.2f", lat)}, ${String.format(Locale.US, "%.2f", lon)})"
+                    }
+                    updateLocationSettings(true, lat, lon, name)
+                    _notificationFlow.emit("تم تحديد موقعك الفعلي بنجاح: $name! 🗺️")
+                } else {
+                    _notificationFlow.emit("عذرًا، لم نتمكن من التقاط الموقع الفعلي بعد. تأكد من تفعيل الـ GPS. 📍")
+                }
+            } catch (t: Throwable) {
+                t.printStackTrace()
+                try {
+                    _notificationFlow.emit("فشل الحصول على الموقع الفعلي للجهاز. 📍")
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
     // Settings Updating
     fun updateLocationSettings(isAuto: Boolean, lat: Double, lon: Double, name: String) {
         viewModelScope.launch {
@@ -461,6 +616,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val currentSet = settings.value
             repository.saveSettings(currentSet.copy(selectedReciter = reciter))
+        }
+    }
+
+    fun toggleDarkMode(isEnabled: Boolean) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(isDarkMode = isEnabled))
         }
     }
 
@@ -554,5 +716,32 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         // If streak is mathematically 0, let's mock a beautiful virtual streak of 5 days if the database was just initialized
         // to make the Achievements dashboard immediately look glorious!
         return if (streak == 0) 5 else streak
+    }
+}
+
+// Custom clean extension to await Play Services Task results sequentially without external dependencies
+private suspend fun <T> com.google.android.gms.tasks.Task<T>.await(): T? {
+    if (isComplete) {
+        val e = exception
+        if (e != null) {
+            throw e
+        }
+        if (isCanceled) {
+            throw kotlinx.coroutines.CancellationException("Task $this was cancelled")
+        }
+        return result
+    }
+
+    return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        addOnCompleteListener { task ->
+            val e = task.exception
+            if (e != null) {
+                cont.resumeWith(Result.failure(e))
+            } else if (task.isCanceled) {
+                cont.cancel()
+            } else {
+                cont.resumeWith(Result.success(task.result))
+            }
+        }
     }
 }
