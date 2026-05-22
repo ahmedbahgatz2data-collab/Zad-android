@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1476,56 +1477,109 @@ fun FamilyScreen(
 
         // Beautiful Google Accounts simulation sheet / dialog
         if (showGoogleAuthDialog) {
-            var inputName by remember { mutableStateOf("") }
-            var inputEmail by remember { mutableStateOf("") }
-            AlertDialog(
-                onDismissRequest = { showGoogleAuthDialog = false },
-                title = { Text("تسجيل الدخول", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Dialog(onDismissRequest = { showGoogleAuthDialog = false }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F1F)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            Surface(
+                                modifier = Modifier.size(24.dp),
+                                shape = CircleShape,
+                                color = Color.White
+                            ) {
+                                Text("G", color = Color.Blue, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp, top=2.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "تسجيل الدخول باستخدام Google",
+                                color = Color.White,
+                                fontSize = 14.sp
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
                         Text(
-                            text = "أدخل بياناتك للمتابعة والتسجيل في منصة زاد:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            "اختيار حساب",
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Normal
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = inputName,
-                            onValueChange = { inputName = it },
-                            label = { Text("الاسم") },
-                            modifier = Modifier.fillMaxWidth()
+                        Text(
+                            "المتابعة إلى زاد",
+                            color = Color(0xFFA8C7FA),
+                            fontSize = 14.sp
                         )
-                        OutlinedTextField(
-                            value = inputEmail,
-                            onValueChange = { inputEmail = it },
-                            label = { Text("البريد الإلكتروني") },
-                            modifier = Modifier.fillMaxWidth()
+                        Spacer(modifier = Modifier.height(24.dp))
+                        HorizontalDivider(color = Color.DarkGray)
+                        
+                        val mockAccounts = listOf(
+                            Triple("Ahmed Eldokmery", "abeldokmery@gmail.com", "A"),
+                            Triple("أحمد الدقميري", "medoo51195@gmail.com", "م"),
+                            Triple("Ahmed Bahgat", "ahmed.bahgatz2data@gmail.com", "A")
                         )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (inputName.isNotBlank() && inputEmail.isNotBlank()) {
-                                viewModel.signInWithGoogle(
-                                    id = inputEmail.hashCode().toString(),
-                                    name = inputName,
-                                    email = inputEmail,
-                                    avatar = "avatar1"
-                                )
-                                showGoogleAuthDialog = false
+                        
+                        mockAccounts.forEach { acc ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.signInWithGoogle(
+                                            id = acc.second.hashCode().toString(),
+                                            name = acc.first,
+                                            email = acc.second,
+                                            avatar = "avatar"
+                                        )
+                                        showGoogleAuthDialog = false
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF004D40)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(acc.third, color = Color.White)
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(acc.first, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                    Text(acc.second, color = Color.LightGray, fontSize = 12.sp)
+                                }
                             }
+                            HorizontalDivider(color = Color.DarkGray)
                         }
-                    ) {
-                        Text("متابعة")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showGoogleAuthDialog = false }) {
-                        Text("إلغاء المتابعة")
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { /* No action mock */ }
+                                .padding(vertical = 16.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Person,
+                                contentDescription = null,
+                                tint = Color.LightGray,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text("استخدام حساب آخر", color = Color.White, fontSize = 14.sp)
+                        }
                     }
                 }
-            )
+            }
         }
 
         // Removed Add Member dialog, handled by invite code.
@@ -2272,40 +2326,77 @@ fun SettingsScreen(
 
                         // Manual offset times input display setup
                         Spacer(modifier = Modifier.height(10.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = settings.manualFajr,
-                                onValueChange = {
-                                    viewModel.updateManualPrayerTimes(
-                                        it, settings.manualShurouq, settings.manualDhuhr,
-                                        settings.manualAsr, settings.manualMaghrib, settings.manualIsha
-                                    )
-                                },
-                                label = { Text("الفجر", fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = settings.manualDhuhr,
-                                onValueChange = {
-                                    viewModel.updateManualPrayerTimes(
-                                        settings.manualFajr, settings.manualShurouq, it,
-                                        settings.manualAsr, settings.manualMaghrib, settings.manualIsha
-                                    )
-                                },
-                                label = { Text("الظهر", fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = settings.manualAsr,
-                                onValueChange = {
-                                    viewModel.updateManualPrayerTimes(
-                                        settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
-                                        it, settings.manualMaghrib, settings.manualIsha
-                                    )
-                                },
-                                label = { Text("العصر", fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
+                        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = settings.manualFajr,
+                                    onValueChange = {
+                                        viewModel.updateManualPrayerTimes(
+                                            it, settings.manualShurouq, settings.manualDhuhr,
+                                            settings.manualAsr, settings.manualMaghrib, settings.manualIsha
+                                        )
+                                    },
+                                    label = { Text("الفجر", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = settings.manualShurouq,
+                                    onValueChange = {
+                                        viewModel.updateManualPrayerTimes(
+                                            settings.manualFajr, it, settings.manualDhuhr,
+                                            settings.manualAsr, settings.manualMaghrib, settings.manualIsha
+                                        )
+                                    },
+                                    label = { Text("الشروق", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = settings.manualDhuhr,
+                                    onValueChange = {
+                                        viewModel.updateManualPrayerTimes(
+                                            settings.manualFajr, settings.manualShurouq, it,
+                                            settings.manualAsr, settings.manualMaghrib, settings.manualIsha
+                                        )
+                                    },
+                                    label = { Text("الظهر", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = settings.manualAsr,
+                                    onValueChange = {
+                                        viewModel.updateManualPrayerTimes(
+                                            settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
+                                            it, settings.manualMaghrib, settings.manualIsha
+                                        )
+                                    },
+                                    label = { Text("العصر", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = settings.manualMaghrib,
+                                    onValueChange = {
+                                        viewModel.updateManualPrayerTimes(
+                                            settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
+                                            settings.manualAsr, it, settings.manualIsha
+                                        )
+                                    },
+                                    label = { Text("المغرب", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = settings.manualIsha,
+                                    onValueChange = {
+                                        viewModel.updateManualPrayerTimes(
+                                            settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
+                                            settings.manualAsr, settings.manualMaghrib, it
+                                        )
+                                    },
+                                    label = { Text("العشاء", fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
 
@@ -2352,15 +2443,16 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "🔔 بوابة إدارة التنبيهات والأذكار المخصصة",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = { showAddReminderDialog = true },
                             colors = ButtonDefaults.buttonColors(
@@ -2369,7 +2461,7 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.testTag("add_reminder_btn")
                         ) {
-                            Text("إضافة تذكير", fontSize = 11.sp)
+                            Text("إضافة تذكير", fontSize = 11.sp, maxLines = 1)
                         }
                     }
 
@@ -3031,56 +3123,109 @@ fun AppWideWelcomeLoginScreen(
 
     // Google Sign-In Interactive Simulation Dialog
     if (showGoogleAuthDialog) {
-        var inputName by remember { mutableStateOf("") }
-        var inputEmail by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showGoogleAuthDialog = false },
-            title = { Text("تسجيل الدخول", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Dialog(onDismissRequest = { showGoogleAuthDialog = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F1F)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Surface(
+                            modifier = Modifier.size(24.dp),
+                            shape = CircleShape,
+                            color = Color.White
+                        ) {
+                            Text("G", color = Color.Blue, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp, top=2.dp))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "تسجيل الدخول باستخدام Google",
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        text = "أدخل بياناتك للمتابعة والتسجيل في منصة زاد:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
+                        "اختيار حساب",
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Normal
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = inputName,
-                        onValueChange = { inputName = it },
-                        label = { Text("الاسم") },
-                        modifier = Modifier.fillMaxWidth()
+                    Text(
+                        "المتابعة إلى زاد",
+                        color = Color(0xFFA8C7FA),
+                        fontSize = 14.sp
                     )
-                    OutlinedTextField(
-                        value = inputEmail,
-                        onValueChange = { inputEmail = it },
-                        label = { Text("البريد الإلكتروني") },
-                        modifier = Modifier.fillMaxWidth()
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider(color = Color.DarkGray)
+                    
+                    val mockAccounts = listOf(
+                        Triple("Ahmed Eldokmery", "abeldokmery@gmail.com", "A"),
+                        Triple("أحمد الدقميري", "medoo51195@gmail.com", "م"),
+                        Triple("Ahmed Bahgat", "ahmed.bahgatz2data@gmail.com", "A")
                     )
-                }
-            },
-            confirmButton = { 
-                Button(
-                    onClick = {
-                        if (inputName.isNotBlank() && inputEmail.isNotBlank()) {
-                            viewModel.signInWithGoogle(
-                                id = inputEmail.hashCode().toString(),
-                                name = inputName,
-                                email = inputEmail,
-                                avatar = "avatar1"
-                            )
-                            showGoogleAuthDialog = false
+                    
+                    mockAccounts.forEach { acc ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.signInWithGoogle(
+                                        id = acc.second.hashCode().toString(),
+                                        name = acc.first,
+                                        email = acc.second,
+                                        avatar = "avatar"
+                                    )
+                                    showGoogleAuthDialog = false
+                                }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF004D40)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(acc.third, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(acc.first, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                Text(acc.second, color = Color.LightGray, fontSize = 12.sp)
+                            }
                         }
+                        HorizontalDivider(color = Color.DarkGray)
                     }
-                ) {
-                    Text("متابعة", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGoogleAuthDialog = false }) {
-                    Text("رجوع", fontWeight = FontWeight.Bold)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { /* No action mock */ }
+                            .padding(vertical = 16.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("استخدام حساب آخر", color = Color.White, fontSize = 14.sp)
+                    }
                 }
             }
-        )
+        }
     }
 }
 

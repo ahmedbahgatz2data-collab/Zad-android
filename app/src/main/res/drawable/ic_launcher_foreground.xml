@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@drawable/zad_logo_1779473006776" />
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/zad_logo_1779473006776"
+        android:gravity="center" />
 </layer-list>
