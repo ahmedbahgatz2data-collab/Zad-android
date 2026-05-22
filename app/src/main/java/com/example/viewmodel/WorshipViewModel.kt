@@ -460,14 +460,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             repository.saveSettings(updated)
             _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
             
-            // Seed group members under the new family space
-            val newFamily = listOf(
-                FamilyMember(1, "أحمد (الأخ)", "الأخ", "avatar1", 88f, 12, false, "صلاة العصر"),
-                FamilyMember(2, "أميرة (الوالدة)", "الأم", "avatar2", 100f, 34, false, "الورد اليومي"),
-                FamilyMember(3, "محمد (الأب)", "الأب", "avatar3", 77f, 9, false, "أذكار الصباح"),
-                FamilyMember(4, "فاطمة (الأخت)", "الأخت", "avatar4", 55f, 15, false, "صلاة الظهر")
-            )
-            repository.insertFamilyMembers(newFamily)
+            // Start empty to let user add actual real-world family members manually
+            repository.insertFamilyMembers(emptyList())
         }
     }
 
@@ -486,15 +480,10 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     familyGroupInviteCode = trimmedCode
                 )
                 repository.saveSettings(updated)
-                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
+                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢 يمكنك الآن إضافة أفراد عائلتك.")
                 
-                // Seed some unique members for this code
-                val joinedFamily = listOf(
-                    FamilyMember(1, "عمر (ابن العم)", "ابن عم", "avatar1", 92f, 21, false, "صلاة الفجر"),
-                    FamilyMember(2, "سارة (الخالة)", "خالة", "avatar2", 85f, 40, false, "الورد اليومي"),
-                    FamilyMember(3, "خالد (الخال)", "خال", "avatar3", 60f, 18, false, "أذكار المساء")
-                )
-                repository.insertFamilyMembers(joinedFamily)
+                // Start empty to let user add actual real-world family members manually
+                repository.insertFamilyMembers(emptyList())
             } else {
                 _notificationFlow.emit("كود الدعوة غير صالح! الرجاء إدخال كود بالصيغة ZAD-XXXX ❌")
             }
