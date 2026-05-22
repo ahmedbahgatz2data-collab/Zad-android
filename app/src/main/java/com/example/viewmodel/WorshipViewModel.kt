@@ -643,33 +643,131 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun triggerStandardVibration() {
+    fun triggerStandardVibration() {
         try {
-            val vibrator = getApplication<Application>().getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            vibrator?.vibrate(100)
+            val vibrator = getApplication<Application>().getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (vibrator != null) {
+                val isEnabled = settings.value.isVibrationEnabled
+                if (isEnabled) {
+                    val pattern = settings.value.vibrationPattern
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        val effect = when (pattern) {
+                            "نبض خفيف" -> android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+                            "نبض الفرح" -> android.os.VibrationEffect.createWaveform(longArrayOf(0, 80, 50, 120, 50, 80), -1)
+                            "نبض قوي ومستمر" -> android.os.VibrationEffect.createWaveform(longArrayOf(0, 400, 150, 400), -1)
+                            "نبض متقطع" -> android.os.VibrationEffect.createWaveform(longArrayOf(0, 100, 80, 100, 80, 100, 80, 100), -1)
+                            else -> android.os.VibrationEffect.createOneShot(100, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+                        }
+                        vibrator.vibrate(effect)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        when (pattern) {
+                            "نبض خفيف" -> vibrator.vibrate(50)
+                            "نبض الفرح" -> vibrator.vibrate(longArrayOf(0, 80, 50, 120, 50, 80), -1)
+                            "نبض قوي ومستمر" -> vibrator.vibrate(longArrayOf(0, 400, 150, 400), -1)
+                            "نبض متقطع" -> vibrator.vibrate(longArrayOf(0, 100, 80, 100, 80, 100, 80, 100), -1)
+                            else -> vibrator.vibrate(100)
+                        }
+                    }
+                }
+            }
         } catch (e: Throwable) {
             e.printStackTrace()
         }
     }
 
+    fun toggleVibration(isEnabled: Boolean) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(isVibrationEnabled = isEnabled))
+            _notificationFlow.emit(if (isEnabled) "تم تفعيل الاهتزاز للتنبيهات 📳" else "تم إيقاف الاهتزاز 🚫")
+            if (isEnabled) {
+                kotlinx.coroutines.delay(200)
+                triggerStandardVibration()
+            }
+        }
+    }
+
+    fun updateVibrationPattern(pattern: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(vibrationPattern = pattern))
+            _notificationFlow.emit("تم تغيير نمط الاهتزاز إلى: $pattern 🔄")
+            kotlinx.coroutines.delay(200)
+            triggerStandardVibration()
+        }
+    }
+
+    fun deleteFamilyMember(id: Int) {
+        viewModelScope.launch {
+            val list = familyMembers.value.toMutableList()
+            list.removeAll { it.id == id }
+            repository.insertFamilyMembers(list)
+            _notificationFlow.emit("تم حذف فرد العائلة من المجموعة. 👥")
+        }
+    }
+
+    fun simulateWorshipForMember(id: Int) {
+        viewModelScope.launch {
+            val list = familyMembers.value.toMutableList()
+            val index = list.indexOfFirst { it.id == id }
+            if (index != -1) {
+                val member = list[index]
+                val randomWorships = listOf(
+                    "صلاة الفجر في جماعة 🕌",
+                    "تلاوة حزب من القرآن الكريم 📖",
+                    "أذكار الصباح كاملة ☀️",
+                    "الاستغفار والتسبيح 100 مرة 📿",
+                    "صلاة الضحى المباركة ☀️",
+                    "صلاة العصر بالمسجد 🕌",
+                    "أوراد المساء المأثورة 🌙",
+                    "قيام وركعات الوتر 🌌"
+                )
+                val randomWorship = randomWorships.random()
+                val addedProgress = (10..20).random()
+                val newProgress = (member.progress + addedProgress).coerceAtMost(100f)
+                val updatedMember = member.copy(
+                    progress = newProgress,
+                    lastWorship = randomWorship
+                )
+                list[index] = updatedMember
+                repository.insertFamilyMembers(list)
+                
+                // Nudge user about simulated update
+                val msg = "⚡ طاعة جديدة! ${member.name} قام بتأدية: $randomWorship (+${addedProgress}%)"
+                _notificationFlow.emit(msg)
+                triggerStandardVibration()
+            }
+        }
+    }
+
     private fun startIncomingLikesSimulation() {
         viewModelScope.launch {
-            kotlinx.coroutines.delay(45 * 1000) // Start first alert after 45 seconds to not clutter initial open
+            kotlinx.coroutines.delay(30 * 1000) // Start first alert after 30 seconds
             while (true) {
+                val members = familyMembers.value
                 val progressPercent = currentProgress.value.calculatePercentage()
-                if (progressPercent > 0) {
-                    val friends = listOf("أحمد", "الوالدة أميرة", "الوالد محمد", "الأخت فاطمة")
-                    val randomFriend = friends.random()
+                val hasMembers = members.isNotEmpty()
+                
+                if (hasMembers && (0..1).random() == 1) {
+                    // Simulate a random member doing a worship!
+                    val randomId = members.random().id
+                    simulateWorshipForMember(randomId)
+                } else if (progressPercent > 0) {
+                    // Simulate family member liking user progress
+                    val randomFriend = if (hasMembers) {
+                        members.random().name
+                    } else {
+                        listOf("أحمد (الأخ)", "الوالدة أميرة", "الوالد محمد").random()
+                    }
                     val worships = listOf("الصلوات الخمس في وقتها", "أذكار الصباح والمساء", "الورد القرآني", "سنن الرواتب")
                     val randomWorship = worships.random()
                     
                     val textAlert = "❤️ قام(ت) $randomFriend بالإعجاب بالتزامك بـ $randomWorship!"
                     _notificationFlow.emit(textAlert)
-                    
-                    // Trigger sound/vibration
                     triggerStandardVibration()
                 }
-                kotlinx.coroutines.delay(120 * 1000) // Repeat every 120 seconds
+                kotlinx.coroutines.delay(60 * 1000) // Repeat every 60 seconds
             }
         }
     }

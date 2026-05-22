@@ -108,7 +108,11 @@ data class AppSettings(
 
     // Family Group Space Integration
     val familyGroupName: String = "",
-    val familyGroupInviteCode: String = ""
+    val familyGroupInviteCode: String = "",
+
+    // Vibration Customization
+    val isVibrationEnabled: Boolean = true,
+    val vibrationPattern: String = "نبض الفرح" // "نبض خفيف", "نبض الفرح", "نبض قوي ومستمر", "نبض متقطع"
 )
 
 @Dao
@@ -158,7 +162,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {

@@ -1355,7 +1355,12 @@ fun FamilyScreen(
                         }
                     } else {
                         items(familyList) { member ->
-                            FamilyMemberItemCard(member = member, onLikeClick = { viewModel.likeFamilyMember(member.id) })
+                            FamilyMemberItemCard(
+                                member = member,
+                                onLikeClick = { viewModel.likeFamilyMember(member.id) },
+                                onSimulateWorshipClick = { viewModel.simulateWorshipForMember(member.id) },
+                                onDeleteClick = { viewModel.deleteFamilyMember(member.id) }
+                            )
                         }
                     }
 
@@ -1528,7 +1533,9 @@ fun FamilyScreen(
 @Composable
 fun FamilyMemberItemCard(
     member: FamilyMember,
-    onLikeClick: () -> Unit
+    onLikeClick: () -> Unit,
+    onSimulateWorshipClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
     Card(
@@ -1645,6 +1652,49 @@ fun FamilyMemberItemCard(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Simulate worship button
+                Button(
+                    onClick = onSimulateWorshipClick,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "محاكاة طاعة ⚡",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Delete member button
+                OutlinedButton(
+                    onClick = onDeleteClick,
+                    modifier = Modifier.width(90.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color.Red.copy(alpha = 0.8f)
+                    ),
+                    border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "حذف 🗑️",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -2386,6 +2436,92 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
                     )
+                }
+            }
+        }
+
+        // Vibration and tactile styling
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "📳 التحكم في الاهتزاز والتنبيه اللمسي",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "تمكين الاهتزاز مع التنبيهات والآذان:",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Switch(
+                            checked = settings.isVibrationEnabled,
+                            onCheckedChange = { viewModel.toggleVibration(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    if (settings.isVibrationEnabled) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "نمط نبض التنبيه (اضغط للاختيار والتجربة):",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        val patterns = listOf("نبض خفيف", "نبض الفرح", "نبض قوي ومستمر", "نبض متقطع")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            patterns.forEach { pattern ->
+                                val scoreSelected = settings.vibrationPattern == pattern
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (scoreSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            else Color.Gray.copy(alpha = 0.1f)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (scoreSelected) MaterialTheme.colorScheme.primary
+                                            else Color.Transparent,
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable {
+                                            viewModel.updateVibrationPattern(pattern)
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = pattern,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (scoreSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (scoreSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
