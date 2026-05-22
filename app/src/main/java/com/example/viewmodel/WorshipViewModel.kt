@@ -2,8 +2,8 @@ package com.example.viewmodel
 
 import android.util.Log // Add Log for debugging as well, as needed.
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.ktx.auth
-import com.google.firebase.ktx.Firebase
+import com.google.firebase.auth.auth
+import com.google.firebase.Firebase
 import android.app.Application
 
 import android.content.Context
@@ -40,6 +40,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import java.util.concurrent.TimeUnit
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -769,9 +773,24 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             streak = 1
         }
         
+        
         // If streak is mathematically 0, let's mock a beautiful virtual streak of 5 days if the database was just initialized
         // to make the Achievements dashboard immediately look glorious!
         return if (streak == 0) 5 else streak
+    }
+
+    fun scheduleNotification(title: String, message: String, intervalHours: Long) {
+        val workRequest = PeriodicWorkRequestBuilder<com.example.workers.WorshipNotificationWorker>(
+            intervalHours, TimeUnit.HOURS
+        ).setInputData(
+            workDataOf("TITLE" to title, "MESSAGE" to message)
+        ).build()
+
+        WorkManager.getInstance(getApplication()).enqueueUniquePeriodicWork(
+            title,
+            androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
     }
 }
 
