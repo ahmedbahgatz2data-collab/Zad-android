@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Decorative Glow -->
+    <path
+        android:fillColor="#1AFFFFFF"
+        android:pathData="M 54 18 A 36 36 0 1 0 90 54 A 36 36 0 0 0 54 18 Z" />
+
+    <!-- Pure Gold Crescent -->
+    <path
+        android:fillColor="#FFF59D"
+        android:pathData="M 62 30 A 24 24 0 1 0 86 54 A 19 19 0 1 1 62 30 Z" />
+        
+    <!-- Golden Shining Star of Zad -->
+    <path
+        android:fillColor="#FFF59D"
+        android:pathData="M 54 34 L 56 39 L 61 39 L 57 42 L 59 47 L 54 44 L 49 47 L 51 42 L 47 39 L 52 39 Z" />
+
+    <!-- Base Holy Archway Foundation structure -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 38 78 L 70 78 L 70 70 C 70 61, 38 61, 38 70 Z" />
+</vector>
