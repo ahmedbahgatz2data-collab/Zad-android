@@ -19,6 +19,7 @@ import com.example.data.WorshipRepository
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import android.annotation.SuppressLint
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -66,10 +67,14 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             initialValue = AppSettings()
         )
 
-    val currentProgress: StateFlow<WorshipProgress> = _currentDate
-        .flatMapLatest { date ->
-            repository.getProgressByDate(date).map { it ?: WorshipProgress(date = date) }
-        }
+    val currentProgress: StateFlow<WorshipProgress> = combine(
+        _currentDate,
+        settings.map { it.googleUserId }.distinctUntilChanged()
+    ) { date, userId ->
+        Pair(date, userId)
+    }.flatMapLatest { (date, userId) ->
+        repository.getProgressByDate(date, userId).map { it ?: WorshipProgress(date = date, userId = userId) }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -91,7 +96,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         )
 
     // Last 30 days history
-    val history: StateFlow<List<WorshipProgress>> = repository.getWorshipHistory()
+    val history: StateFlow<List<WorshipProgress>> = settings
+        .map { it.googleUserId }
+        .distinctUntilChanged()
+        .flatMapLatest { userId ->
+            repository.getWorshipHistory(userId)
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -141,8 +151,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     )
 
     init {
-        seedInitialDataIfNeeded()
-        startIncomingLikesSimulation()
+        // Mock simulation removed based on real conditions
+        viewModelScope.launch {
+            val existingSettings = repository.getSettingsImmediate()
+            if (existingSettings == null) {
+                repository.saveSettings(AppSettings())
+            }
+        }
     }
 
     private fun getTodayDateString(): String {
@@ -290,7 +305,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun resetTodayWorships() {
         viewModelScope.launch {
             val todayDate = getTodayDateString()
-            repository.insertOrUpdateProgress(WorshipProgress(date = todayDate))
+            val userId = settings.value.googleUserId
+            repository.insertOrUpdateProgress(WorshipProgress(date = todayDate, userId = userId))
             _notificationFlow.emit("تمت إعادة ضبط عبادات اليوم بنجاح لتبدأ بهمة متجددة! 🧼")
         }
     }
@@ -352,12 +368,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Custom Reminders Management
-    fun addReminder(title: String, hour: Int, minute: Int, days: String) {
+    fun addReminder(title: String, hour: Int, minute: Int, days: String, sound: String = "الافتراضي") {
         viewModelScope.launch {
             val newReminder = CustomReminder(
                 title = title,
                 hour = hour,
                 minute = minute,
+                soundUri = sound,
                 repeatDays = days,
                 isEnabled = true
             )
@@ -417,11 +434,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Google Sign-In Integration Methods
-    fun signInWithGoogle(name: String, email: String, avatar: String) {
+    fun signInWithGoogle(id: String, name: String, email: String, avatar: String) {
         viewModelScope.launch {
             val currentSet = settings.value
             val updated = currentSet.copy(
                 isGoogleSignedIn = true,
+                googleUserId = id,
                 googleUserName = name,
                 googleUserEmail = email,
                 googleUserAvatarUrl = avatar
@@ -436,6 +454,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             val currentSet = settings.value
             val updated = currentSet.copy(
                 isGoogleSignedIn = false,
+                googleUserId = "default",
                 googleUserName = "",
                 googleUserEmail = "",
                 googleUserAvatarUrl = "",

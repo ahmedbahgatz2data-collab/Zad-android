@@ -179,6 +179,7 @@ fun MainZadContainer(
                             isAudioUnlocked = isAudioUnlocked,
                             viewModel = viewModel
                         )
+                        "qibla" -> QiblaScreen(settings = settingsState)
                         "family" -> FamilyScreen(
                             familyList = familyList,
                             viewModel = viewModel
@@ -1429,18 +1430,6 @@ fun FamilyScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
-
-                            Button(
-                                onClick = { showJoinDialog = true },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("إضافة فرد", fontSize = 12.sp)
-                            }
                         }
                     }
 
@@ -1504,6 +1493,7 @@ fun FamilyScreen(
                         Card(
                             onClick = {
                                 viewModel.signInWithGoogle(
+                                    id = "medoo51195",
                                     name = "محمد البدري",
                                     email = "medoo51195@gmail.com",
                                     avatar = "avatar1"
@@ -1537,42 +1527,6 @@ fun FamilyScreen(
                             }
                         }
 
-                        // Guest account
-                        Card(
-                            onClick = {
-                                viewModel.signInWithGoogle(
-                                    name = "عبد الله الروحاني",
-                                    email = "worshipper.zad@gmail.com",
-                                    avatar = "avatar2"
-                                )
-                                showGoogleAuthDialog = false
-                            },
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF34A853)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("ع", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text("عبد الله الروحاني", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                    Text("worshipper.zad@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                                }
-                            }
-                        }
                     }
                 },
                 confirmButton = {},
@@ -1584,51 +1538,7 @@ fun FamilyScreen(
             )
         }
 
-        // Add Member Dialog
-        if (showJoinDialog) {
-            AlertDialog(
-                onDismissRequest = { showJoinDialog = false },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (newMemberName.isNotBlank()) {
-                                viewModel.addFamilyMember(
-                                    name = newMemberName,
-                                    relation = newMemberRelation
-                                )
-                                showJoinDialog = false
-                                newMemberName = ""
-                            }
-                        }
-                    ) {
-                        Text("إضافة")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showJoinDialog = false }) {
-                        Text("إلغاء")
-                    }
-                },
-                title = { Text("إضافة فرد لدائرة الأهل", fontWeight = FontWeight.Bold) },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = newMemberName,
-                            onValueChange = { newMemberName = it },
-                            label = { Text("الاسم") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        OutlinedTextField(
-                            value = newMemberRelation,
-                            onValueChange = { newMemberRelation = it },
-                            label = { Text("صلة القرابة (مثال: الأخ، ابن العم، الصديق)") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            )
-        }
+        // Removed Add Member dialog, handled by invite code.
     }
 }
 
@@ -2301,6 +2211,7 @@ fun SettingsScreen(
     var reminderTitle by remember { mutableStateOf("") }
     var reminderHour by remember { mutableStateOf(19) }
     var reminderMinute by remember { mutableStateOf(0) }
+    var reminderSound by remember { mutableStateOf("الافتراضي") }
 
     LazyColumn(
         modifier = Modifier
@@ -2748,10 +2659,12 @@ fun SettingsScreen(
                                 title = reminderTitle,
                                 hour = reminderHour,
                                 minute = reminderMinute,
-                                days = "يومي"
+                                days = "يومي",
+                                sound = reminderSound
                             )
                             showAddReminderDialog = false
                             reminderTitle = ""
+                            reminderSound = "الافتراضي"
                         }
                     }
                 ) {
@@ -2790,6 +2703,20 @@ fun SettingsScreen(
                             label = { Text("الدقيقة (0-59)") },
                             modifier = Modifier.weight(1f)
                         )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("صوت التنبيه:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("الافتراضي", "هادئ", "تنبيه قوي").forEach { soundOpt ->
+                            FilterChip(
+                                selected = reminderSound == soundOpt,
+                                onClick = { reminderSound = soundOpt },
+                                label = { Text(soundOpt, fontSize = 11.sp) }
+                            )
+                        }
                     }
                 }
             }
@@ -2834,7 +2761,7 @@ fun ReminderItemRow(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = String.format(Locale.US, "%02d:%02d (%s)", reminder.hour, reminder.minute, reminder.repeatDays),
+                        text = String.format(Locale.US, "%02d:%02d (%s) - %s", reminder.hour, reminder.minute, reminder.repeatDays, reminder.soundUri),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
                     )
@@ -2902,6 +2829,19 @@ fun ZadBottomNavBar(
                     indicatorColor = MaterialTheme.colorScheme.primaryContainer
                 ),
                 modifier = Modifier.testTag("tab_today")
+            )
+
+            NavigationBarItem(
+                selected = selectedTab == "qibla",
+                onClick = { onTabSelected("qibla") },
+                icon = { Icon(Icons.Default.LocationOn, contentDescription = "القبلة") },
+                label = { Text("القبلة", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                ),
+                modifier = Modifier.testTag("tab_qibla")
             )
 
             NavigationBarItem(
@@ -3108,6 +3048,7 @@ fun AppWideWelcomeLoginScreen(
                     Card(
                         onClick = {
                             viewModel.signInWithGoogle(
+                                id = "medoo51195",
                                 name = "أحمد الدقميري",
                                 email = "medoo51195@gmail.com",
                                 avatar = "avatar1"
@@ -3137,43 +3078,6 @@ fun AppWideWelcomeLoginScreen(
                             Column {
                                 Text("أحمد الدقميري (أنت)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                                 Text("medoo51195@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                            }
-                        }
-                    }
-
-                    // Account Option 2 (Guest Developer Account)
-                    Card(
-                        onClick = {
-                            viewModel.signInWithGoogle(
-                                name = "عبد الله الروحاني",
-                                email = "worshipper.zad@gmail.com",
-                                avatar = "avatar2"
-                            )
-                            showGoogleAuthDialog = false
-                        },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF047857)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("ع", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("عبد الله الروحاني", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                Text("worshipper.zad@gmail.com", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                             }
                         }
                     }

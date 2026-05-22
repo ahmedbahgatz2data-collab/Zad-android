@@ -116,8 +116,12 @@ object PrayerTimesCalculator {
         if (normalized.isNaN()) normalized = 12.0
         
         val totalMinutes = (normalized * 60.0).roundToInt()
-        val hours = (totalMinutes / 60) % 24
+        val hours24 = (totalMinutes / 60) % 24
         val minutes = totalMinutes % 60
-        return String.format(Locale.getDefault(), "%02d:%02d", hours, minutes)
+        
+        val period = if (hours24 >= 12) "م" else "ص"
+        val hours12 = if (hours24 % 12 == 0) 12 else hours24 % 12
+        
+        return String.format(Locale("ar"), "%02d:%02d %s", hours12, minutes, period)
     }
 }

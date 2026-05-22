@@ -12,9 +12,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "worship_progress")
+@Entity(tableName = "worship_progress", primaryKeys = ["date", "userId"])
 data class WorshipProgress(
-    @PrimaryKey val date: String, // format "YYYY-MM-DD"
+    val date: String, // format "YYYY-MM-DD"
+    val userId: String = "default",
     val fajr: Boolean = false,
     val dhuhr: Boolean = false,
     val asr: Boolean = false,
@@ -63,6 +64,7 @@ data class CustomReminder(
     val hour: Int,
     val minute: Int,
     val isEnabled: Boolean = true,
+    val soundUri: String = "default", // Custom sound selection
     val repeatDays: String = "السبت, الأحد, الاثنين, الثلاثاء, الأربعاء, الخميس, الجمعة" // comma-separated Days
 )
 
@@ -85,12 +87,12 @@ data class AppSettings(
     val latitude: Double = 21.4225, // Default Mecca
     val longitude: Double = 39.8262,
     val locationName: String = "مكة المكرمة",
-    val manualFajr: String = "04:30",
-    val manualShurouq: String = "05:45",
-    val manualDhuhr: String = "12:20",
-    val manualAsr: String = "15:40",
-    val manualMaghrib: String = "18:50",
-    val manualIsha: String = "20:20",
+    val manualFajr: String = "04:30 ص",
+    val manualShurouq: String = "05:45 ص",
+    val manualDhuhr: String = "12:20 م",
+    val manualAsr: String = "03:40 م",
+    val manualMaghrib: String = "06:50 م",
+    val manualIsha: String = "08:20 م",
     val isAdhanSoundEnabled: Boolean = true,
     val selectedReciter: String = "الشيخ عبد الباسط",
     
@@ -102,6 +104,7 @@ data class AppSettings(
 
     // Google Sign-In Integration
     val isGoogleSignedIn: Boolean = false,
+    val googleUserId: String = "default",
     val googleUserName: String = "",
     val googleUserEmail: String = "",
     val googleUserAvatarUrl: String = "",
@@ -117,17 +120,17 @@ data class AppSettings(
 
 @Dao
 interface WorshipDao {
-    @Query("SELECT * FROM worship_progress WHERE date = :date")
-    fun getProgressByDate(date: String): Flow<WorshipProgress?>
+    @Query("SELECT * FROM worship_progress WHERE date = :date AND userId = :userId")
+    fun getProgressByDate(date: String, userId: String): Flow<WorshipProgress?>
 
-    @Query("SELECT * FROM worship_progress WHERE date = :date")
-    suspend fun getProgressByDateImmediate(date: String): WorshipProgress?
+    @Query("SELECT * FROM worship_progress WHERE date = :date AND userId = :userId")
+    suspend fun getProgressByDateImmediate(date: String, userId: String): WorshipProgress?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateProgress(progress: WorshipProgress)
 
-    @Query("SELECT * FROM worship_progress ORDER BY date DESC LIMIT 30")
-    fun getWorshipHistory(): Flow<List<WorshipProgress>>
+    @Query("SELECT * FROM worship_progress WHERE userId = :userId ORDER BY date DESC LIMIT 30")
+    fun getWorshipHistory(userId: String): Flow<List<WorshipProgress>>
 
     // Custom Reminders
     @Query("SELECT * FROM custom_reminders ORDER BY hour, minute ASC")
@@ -162,7 +165,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {
@@ -178,7 +181,7 @@ abstract class WorshipDatabase : RoomDatabase() {
                     context.applicationContext,
                     WorshipDatabase::class.java,
                     "zad_worship_db"
-                ).fallbackToDestructiveMigration().build()
+                ).fallbackToDestructiveMigration(true).build()
                 INSTANCE = instance
                 instance
             }
@@ -187,10 +190,10 @@ abstract class WorshipDatabase : RoomDatabase() {
 }
 
 class WorshipRepository(private val dao: WorshipDao) {
-    fun getProgressByDate(date: String): Flow<WorshipProgress?> = dao.getProgressByDate(date)
-    suspend fun getProgressByDateImmediate(date: String): WorshipProgress? = dao.getProgressByDateImmediate(date)
+    fun getProgressByDate(date: String, userId: String): Flow<WorshipProgress?> = dao.getProgressByDate(date, userId)
+    suspend fun getProgressByDateImmediate(date: String, userId: String): WorshipProgress? = dao.getProgressByDateImmediate(date, userId)
     suspend fun insertOrUpdateProgress(progress: WorshipProgress) = dao.insertOrUpdateProgress(progress)
-    fun getWorshipHistory(): Flow<List<WorshipProgress>> = dao.getWorshipHistory()
+    fun getWorshipHistory(userId: String): Flow<List<WorshipProgress>> = dao.getWorshipHistory(userId)
 
     fun getAllReminders(): Flow<List<CustomReminder>> = dao.getAllReminders()
     suspend fun insertReminder(reminder: CustomReminder) = dao.insertReminder(reminder)
