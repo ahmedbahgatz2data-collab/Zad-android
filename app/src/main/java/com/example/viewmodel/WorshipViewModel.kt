@@ -50,95 +50,6 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     private val _isAudioUnlocked = MutableStateFlow(false)
     val isAudioUnlocked: StateFlow<Boolean> = _isAudioUnlocked.asStateFlow()
 
-    // Font sizing configuration (صغير, متوسط, كبير)
-    private val _appFontSizeMultiplier = MutableStateFlow("متوسط")
-    val appFontSizeMultiplier: StateFlow<String> = _appFontSizeMultiplier.asStateFlow()
-
-    fun setAppFontSize(size: String) {
-        _appFontSizeMultiplier.value = size
-    }
-
-    // Quran quarters completed count
-    private val _quranQuartersCount = MutableStateFlow(10)
-    val quranQuartersCount: StateFlow<Int> = _quranQuartersCount.asStateFlow()
-
-    fun incrementQuranQuarters(quarters: Int) {
-        _quranQuartersCount.value = _quranQuartersCount.value + quarters
-    }
-
-    fun resetQuranQuarters() {
-        _quranQuartersCount.value = 0
-    }
-
-    // Favorite supplications list
-    private val _favoriteSupplications = MutableStateFlow(listOf<String>())
-    val favoriteSupplications: StateFlow<List<String>> = _favoriteSupplications.asStateFlow()
-
-    fun addFavoriteSupplication(supp: String) {
-        if (supp.isNotBlank() && !_favoriteSupplications.value.contains(supp)) {
-            _favoriteSupplications.value = _favoriteSupplications.value + supp
-        }
-    }
-
-    fun removeFavoriteSupplication(supp: String) {
-        _favoriteSupplications.value = _favoriteSupplications.value - supp
-    }
-
-    // Individual Sunnah checked states
-    private val _sunaFajr = MutableStateFlow(false)
-    val sunaFajr = _sunaFajr.asStateFlow()
-
-    private val _sunaDuha = MutableStateFlow(false)
-    val sunaDuha = _sunaDuha.asStateFlow()
-
-    private val _sunaDhuhrQabli = MutableStateFlow(false)
-    val sunaDhuhrQabli = _sunaDhuhrQabli.asStateFlow()
-
-    private val _sunaDhuhrBadi = MutableStateFlow(false)
-    val sunaDhuhrBadi = _sunaDhuhrBadi.asStateFlow()
-
-    private val _sunaMaghrib = MutableStateFlow(false)
-    val sunaMaghrib = _sunaMaghrib.asStateFlow()
-
-    private val _sunaIsha = MutableStateFlow(false)
-    val sunaIsha = _sunaIsha.asStateFlow()
-
-    private val _sunaQiyam = MutableStateFlow(false)
-    val sunaQiyam = _sunaQiyam.asStateFlow()
-
-    fun toggleSunaFajr() { _sunaFajr.value = !_sunaFajr.value; updateSunnahState() }
-    fun toggleSunaDuha() { _sunaDuha.value = !_sunaDuha.value; updateSunnahState() }
-    fun toggleSunaDhuhrQabli() { _sunaDhuhrQabli.value = !_sunaDhuhrQabli.value; updateSunnahState() }
-    fun toggleSunaDhuhrBadi() { _sunaDhuhrBadi.value = !_sunaDhuhrBadi.value; updateSunnahState() }
-    fun toggleSunaMaghrib() { _sunaMaghrib.value = !_sunaMaghrib.value; updateSunnahState() }
-    fun toggleSunaIsha() { _sunaIsha.value = !_sunaIsha.value; updateSunnahState() }
-    fun toggleSunaQiyam() { _sunaQiyam.value = !_sunaQiyam.value; updateSunnahState() }
-
-    private fun updateSunnahState() {
-        val anyActive = _sunaFajr.value || _sunaDuha.value || _sunaDhuhrQabli.value || 
-                        _sunaDhuhrBadi.value || _sunaMaghrib.value || _sunaIsha.value || _sunaQiyam.value
-        viewModelScope.launch {
-            val current = currentProgress.value
-            if (current.sunnahPrayed != anyActive) {
-                repository.insertOrUpdateProgress(current.copy(sunnahPrayed = anyActive))
-            }
-        }
-    }
-
-    fun resetTodayWorships() {
-        viewModelScope.launch {
-            val emptyProgress = WorshipProgress(date = getTodayDateString())
-            repository.insertOrUpdateProgress(emptyProgress)
-            _sunaFajr.value = false
-            _sunaDuha.value = false
-            _sunaDhuhrQabli.value = false
-            _sunaDhuhrBadi.value = false
-            _sunaMaghrib.value = false
-            _sunaIsha.value = false
-            _sunaQiyam.value = false
-        }
-    }
-
     // Shared Flow for real-time notifications (e.g. from Family hearts)
     private val _notificationFlow = MutableSharedFlow<String>()
     val notificationFlow: SharedFlow<String> = _notificationFlow.asSharedFlow()
@@ -319,6 +230,121 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val current = currentProgress.value
             repository.insertOrUpdateProgress(current.copy(sunnahPrayed = !current.sunnahPrayed))
+        }
+    }
+
+    // Individual Sunnah tracking methods
+    fun toggleSunnahFajr() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahFajr = !current.sunnahFajr))
+        }
+    }
+
+    fun toggleSunnahDuha() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahDuha = !current.sunnahDuha))
+        }
+    }
+
+    fun toggleSunnahDhuhrQabli() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahDhuhrQabli = !current.sunnahDhuhrQabli))
+        }
+    }
+
+    fun toggleSunnahDhuhrBadi() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahDhuhrBadi = !current.sunnahDhuhrBadi))
+        }
+    }
+
+    fun toggleSunnahMaghrib() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahMaghrib = !current.sunnahMaghrib))
+        }
+    }
+
+    fun toggleSunnahIsha() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahIsha = !current.sunnahIsha))
+        }
+    }
+
+    fun toggleSunnahQiyam() {
+        viewModelScope.launch {
+            val current = currentProgress.value
+            repository.insertOrUpdateProgress(current.copy(sunnahQiyam = !current.sunnahQiyam))
+        }
+    }
+
+    // Reset all activities for today
+    fun resetTodayWorships() {
+        viewModelScope.launch {
+            val todayDate = getTodayDateString()
+            repository.insertOrUpdateProgress(WorshipProgress(date = todayDate))
+            _notificationFlow.emit("تمت إعادة ضبط عبادات اليوم بنجاح لتبدأ بهمة متجددة! 🧼")
+        }
+    }
+
+    // Quran quarters modifier
+    fun incrementQuranQuarters(quarters: Int) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val currentCount = currentSet.quranQuartersCount
+            val newCount = (currentCount + quarters).coerceAtLeast(0)
+            repository.saveSettings(currentSet.copy(quranQuartersCount = newCount))
+            if (quarters > 0) {
+                _notificationFlow.emit("الحمد لله! تم تسجيل قراءة $quarters ربعًا إضافيًا من القرآن الكريم! 📖")
+            }
+        }
+    }
+
+    fun resetQuranQuarters() {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(quranQuartersCount = 0))
+            _notificationFlow.emit("تمت إعادة تعيين تتبع أوراد القرآن الكريم. 🧼")
+        }
+    }
+
+    // Font Sizing updater
+    fun setAppFontSize(sizeMultiplier: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(appFontSizeMultiplier = sizeMultiplier))
+        }
+    }
+
+    // Favorites supplications lists
+    fun addFavoriteSupplication(supp: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val currentJson = currentSet.favoriteSupplicationsJson
+            val list = if (currentJson.isBlank()) mutableListOf() else currentJson.split("|#|").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+            if (!list.contains(supp)) {
+                list.add(supp)
+                repository.saveSettings(currentSet.copy(favoriteSupplicationsJson = list.joinToString("|#|")))
+                _notificationFlow.emit("تمت إضافة الدعاء لمفضلتك الروحية بنجاح! ❤️")
+            }
+        }
+    }
+
+    fun removeFavoriteSupplication(supp: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val currentJson = currentSet.favoriteSupplicationsJson
+            val list = if (currentJson.isBlank()) mutableListOf() else currentJson.split("|#|").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+            if (list.contains(supp)) {
+                list.remove(supp)
+                repository.saveSettings(currentSet.copy(favoriteSupplicationsJson = list.joinToString("|#|")))
+                _notificationFlow.emit("تمت إزالة الدعاء من مفضلتك. 💔")
+            }
         }
     }
 

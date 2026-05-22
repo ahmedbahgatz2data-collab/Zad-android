@@ -23,11 +23,20 @@ data class WorshipProgress(
     val adhkarMorning: Boolean = false,
     val adhkarEvening: Boolean = false,
     val quranRead: Boolean = false,
-    val sunnahPrayed: Boolean = false
+    val sunnahPrayed: Boolean = false,
+    
+    // Fine-grained Sunnah tracking
+    val sunnahFajr: Boolean = false,
+    val sunnahDuha: Boolean = false,
+    val sunnahDhuhrQabli: Boolean = false,
+    val sunnahDhuhrBadi: Boolean = false,
+    val sunnahMaghrib: Boolean = false,
+    val sunnahIsha: Boolean = false,
+    val sunnahQiyam: Boolean = false
 ) {
     fun calculatePercentage(): Float {
         var completed = 0
-        var total = 10
+        val total = 9 // Total 9 core disciplines
         if (fajr) completed++
         if (dhuhr) completed++
         if (asr) completed++
@@ -36,10 +45,12 @@ data class WorshipProgress(
         if (adhkarMorning) completed++
         if (adhkarEvening) completed++
         if (quranRead) completed++
-        if (sunnahPrayed) completed++
+        // Overall Sunnah was prayed if any fine-grained sunnah is done or the old field was checked
+        val isAnySunnahPrayed = sunnahPrayed || sunnahFajr || sunnahDuha || 
+                sunnahDhuhrQabli || sunnahDhuhrBadi || sunnahMaghrib || 
+                sunnahIsha || sunnahQiyam
+        if (isAnySunnahPrayed) completed++
         
-        // Let's add standard weight so total is 9 items
-        total = 9
         val score = (completed.toFloat() / total.toFloat()) * 100f
         return score.coerceIn(0f, 100f)
     }
@@ -81,7 +92,12 @@ data class AppSettings(
     val manualMaghrib: String = "18:50",
     val manualIsha: String = "20:20",
     val isAdhanSoundEnabled: Boolean = true,
-    val selectedReciter: String = "الشيخ عبد الباسط"
+    val selectedReciter: String = "الشيخ عبد الباسط",
+    
+    // Additional Customization Features
+    val appFontSizeMultiplier: String = "متوسط", // "صغير", "متوسط", "كبير"
+    val quranQuartersCount: Int = 0,             // Quran quarters read
+    val favoriteSupplicationsJson: String = ""    // Comma separated supplications
 )
 
 @Dao
@@ -131,7 +147,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {

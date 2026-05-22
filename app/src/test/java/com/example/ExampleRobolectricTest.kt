@@ -30,4 +30,15 @@ class ExampleRobolectricTest {
       throw t
     }
   }
+
+  @Test
+  fun `test MainActivity launch`() {
+    try {
+      val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+      org.junit.Assert.assertNotNull(controller.get())
+    } catch (t: Throwable) {
+      t.printStackTrace()
+      throw t
+    }
+  }
 }

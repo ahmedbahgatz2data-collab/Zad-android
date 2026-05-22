@@ -22,7 +22,9 @@ object PrayerTimesCalculator {
         calendar: Calendar = Calendar.getInstance()
     ): PrayerTimesList {
         val dayOfYear = calendar.get(Calendar.DAY_OF_YEAR)
-        val timezone = calendar.timeZone.getOffset(calendar.timeInMillis).toDouble() / (1000.0 * 60.0 * 60.0)
+        // Calculate the standard timezone for this longitude to display localized times correctly
+        // (e.g. Mecca longitude approx 39.8 -> GMT+3) instead of using the emulator's host timezone (e.g. UTC/PST cloud runner)
+        val timezone = Math.round(longitude / 15.0).toDouble()
 
         // Mathematical conversion to angles
         val d = dayOfYear.toDouble()

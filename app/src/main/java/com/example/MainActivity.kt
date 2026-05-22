@@ -62,8 +62,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
-                // Force RTL standard Arabic Layout
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                val settingsState by viewModel.settings.collectAsStateWithLifecycle()
+                val fontScale = when (settingsState.appFontSizeMultiplier) {
+                    "صغير" -> 0.85f
+                    "كبير" -> 1.25f
+                    else -> 1.0f
+                }
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                val customDensity = androidx.compose.ui.unit.Density(
+                    density = density.density,
+                    fontScale = density.fontScale * fontScale
+                )
+                // Force RTL standard Arabic Layout and dynamic scale
+                CompositionLocalProvider(
+                    LocalLayoutDirection provides LayoutDirection.Rtl,
+                    androidx.compose.ui.platform.LocalDensity provides customDensity
+                ) {
                     Scaffold(
                         modifier = Modifier.fillMaxSize()
                     ) { innerPadding ->
@@ -145,7 +159,8 @@ fun MainZadContainer(
                     )
                     "stats" -> StatsScreen(
                         streak = streakCount,
-                        history = listOf(70, 85, 90, 60, 100, 80, 95) // Completion % for the last 7 days
+                        history = listOf(70, 85, 90, 60, 100, 80, 95), // Completion % for the last 7 days
+                        viewModel = viewModel
                     )
                     "settings" -> SettingsScreen(
                         settings = settingsState,
@@ -246,6 +261,13 @@ fun ZadHeader(settings: AppSettings) {
     }
 }
 
+data class SunnahBundle(
+    val title: String,
+    val isChecked: Boolean,
+    val onToggle: () -> Unit,
+    val emoji: String
+)
+
 @Composable
 fun TodayScreen(
     progress: WorshipProgress,
@@ -255,6 +277,7 @@ fun TodayScreen(
     viewModel: WorshipViewModel
 ) {
     val percentage = progress.calculatePercentage()
+    val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
 
     LazyColumn(
         modifier = Modifier
@@ -354,13 +377,175 @@ fun TodayScreen(
                 icon = "📖"
             )
         }
+
+        // Detailed Sunnah Segmented card
         item {
-            WorshipCheckItem(
-                title = "النوافل وسنن الرواتب اليومية",
-                isChecked = progress.sunnahPrayed,
-                onCheckedChange = { viewModel.toggleSunnahPrayed() },
-                icon = "✨"
+            var isExpanded by remember { mutableStateOf(false) }
+            val completedSunnahs = listOf(
+                progress.sunnahFajr, progress.sunnahDuha, progress.sunnahDhuhrQabli,
+                progress.sunnahDhuhrBadi, progress.sunnahMaghrib, progress.sunnahIsha, progress.sunnahQiyam
+            ).count { it }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDark) {
+                        if (progress.sunnahPrayed || completedSunnahs > 0) Color(0xFF10B981).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.05f)
+                    } else {
+                        if (progress.sunnahPrayed || completedSunnahs > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                    }
+                ),
+                border = if (isDark) {
+                    BorderStroke(1.dp, if (progress.sunnahPrayed || completedSunnahs > 0) Color(0xFF10B981).copy(alpha = 0.3f) else Color.White.copy(alpha = 0.1f))
+                } else null,
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isExpanded = !isExpanded }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "✨", fontSize = 24.sp)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "النوافل وسنن الرواتب الصلاة",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (completedSunnahs > 0) "تم إنجاز $completedSunnahs من ٧ سنن اليوم! 🎉" else "اضغط لتفصيل ركعات وسنن اليوم تالياً 👇",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                        IconButton(onClick = { isExpanded = !isExpanded }) {
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = "عرض السنن",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    if (isExpanded) {
+                        HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.3f))
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val sunnahsList = listOf(
+                                SunnahBundle("ركعتا الفجر القبلية", progress.sunnahFajr, { viewModel.toggleSunnahFajr() }, "🌅"),
+                                SunnahBundle("سنة الضحى المباركة", progress.sunnahDuha, { viewModel.toggleSunnahDuha() }, "☀️"),
+                                SunnahBundle("سنة الظهر القبلية (٤ ركعات)", progress.sunnahDhuhrQabli, { viewModel.toggleSunnahDhuhrQabli() }, "🌤️"),
+                                SunnahBundle("سنة الظهر البعدية (ركعتان)", progress.sunnahDhuhrBadi, { viewModel.toggleSunnahDhuhrBadi() }, "🌤️"),
+                                SunnahBundle("سنة المغرب البعدية (ركعتان)", progress.sunnahMaghrib, { viewModel.toggleSunnahMaghrib() }, "🌇"),
+                                SunnahBundle("سنة العشاء البعدية (ركعتان)", progress.sunnahIsha, { viewModel.toggleSunnahIsha() }, "🌌"),
+                                SunnahBundle("قيام الليل والسر والوتر", progress.sunnahQiyam, { viewModel.toggleSunnahQiyam() }, "✨")
+                            )
+
+                            sunnahsList.forEach { s ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { s.onToggle() }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(s.emoji, fontSize = 16.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(s.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                    }
+                                    Checkbox(
+                                        checked = s.isChecked,
+                                        onCheckedChange = { s.onToggle() },
+                                        colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Prophetic Supplications Reference Library Card
+        item {
+            Text(
+                text = "مكتبة الأدعية والأورداد النبوية المأثورة 🕌:",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
             )
+        }
+
+        val supps = listOf(
+            "اللَّهُمَّ إِنَّكَ عَفُوٌّ تُحِبُّ الْعَفْوَ فَاعْفُ عَنِّي.",
+            "رَبَّنَا آتِنَا فِي الدُّنْيَا حَسَنَةً وَفِي الْآخِرَةِ حَسَنَةً وَقِنَا عَذَابَ النَّارِ.",
+            "يَا مُقَلِّبَ الْقُلُوبِ ثَبِّتْ قَلْبِي عَلَى دِينِكَ.",
+            "اللَّهُمَّ إِنِّي أَسْأَلُكَ الْعَفْوَ وَالعَافِيَةَ فِي الدُّنْيَا وَالْآخِرَةِ.",
+            "لَا إِلَهَ إِلَّا أَنْتَ سُبْحَانَكَ إِنِّي كُنْتُ مِنَ الظَّالِمِينَ."
+        )
+
+        items(supps) { supp ->
+            val favsStr = settings.favoriteSupplicationsJson
+            val isFav = remember(favsStr) {
+                favsStr.contains(supp)
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDark) Color.White.copy(alpha = 0.04f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                ),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.4f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = supp,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            lineHeight = 18.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = {
+                            if (isFav) {
+                                viewModel.removeFavoriteSupplication(supp)
+                            } else {
+                                viewModel.addFavoriteSupplication(supp)
+                            }
+                        }) {
+                            Icon(
+                                imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = if (isFav) "إزالة من المفضلات" else "إضافة للمفضلات",
+                                tint = if (isFav) Color.Red else Color.LightGray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         item {
@@ -572,59 +757,64 @@ fun PrayerTimesGrid(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp) // Bound height
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(items) { p ->
-                    val isNext = curTimeStr < p.second
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isDark) {
-                                if (isNext) Color(0xFF10B981).copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f)
-                            } else {
-                                if (isNext) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                            }
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (isDark) {
-                                if (isNext) Color(0xFF10B981).copy(alpha = 0.4f) else Color.White.copy(alpha = 0.1f)
-                            } else {
-                                if (isNext) MaterialTheme.colorScheme.primary else Color.Transparent
-                            }
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .graphicsLayer {
-                                this.alpha = if (isNext || !isDark) 1f else 0.6f
-                            }
+                // Slicing items into 2 rows of 3 elements
+                val chunkedItems = items.chunked(3)
+                chunkedItems.forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .padding(10.dp)
-                                .fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(text = p.third, fontSize = 20.sp)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = p.first,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = p.second,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.ExtraBold
-                            )
+                        rowItems.forEach { p ->
+                            val isNext = curTimeStr < p.second
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDark) {
+                                        if (isNext) Color(0xFF10B981).copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f)
+                                    } else {
+                                        if (isNext) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                    }
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (isDark) {
+                                        if (isNext) Color(0xFF10B981).copy(alpha = 0.4f) else Color.White.copy(alpha = 0.1f)
+                                    } else {
+                                        if (isNext) MaterialTheme.colorScheme.primary else Color.Transparent
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer {
+                                        this.alpha = if (isNext || !isDark) 1f else 0.6f
+                                    }
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(10.dp)
+                                        .fillMaxWidth(),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(text = p.third, fontSize = 20.sp)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = p.first,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = p.second,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -972,8 +1162,20 @@ fun FamilyMemberItemCard(
 @Composable
 fun StatsScreen(
     streak: Int,
-    history: List<Int> // Percentage completions last 7 days
+    history: List<Int>, // Percentage completions last 7 days
+    viewModel: WorshipViewModel
 ) {
+    val settingsState by viewModel.settings.collectAsStateWithLifecycle()
+    val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = LocalContext.current
+    val quarters = settingsState.quranQuartersCount
+
+    val favoriteSupplicationsStr = settingsState.favoriteSupplicationsJson
+    val favoriteList = remember(favoriteSupplicationsStr) {
+        if (favoriteSupplicationsStr.isBlank()) emptyList() else favoriteSupplicationsStr.split("|#|").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -982,7 +1184,6 @@ fun StatsScreen(
     ) {
         // Streaks ring Card
         item {
-            val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -1030,7 +1231,6 @@ fun StatsScreen(
 
         // Custom canvas charts representing last week completion
         item {
-            val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -1069,6 +1269,188 @@ fun StatsScreen(
             }
         }
 
+        // Quranic Quarters Tracker Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDark) Color(0xFF0F2621).copy(alpha = 0.4f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                ),
+                border = BorderStroke(1.dp, if (isDark) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(24.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "📖", fontSize = 28.sp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "حصاد وتلاوة القرآن الكريم",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "تتبع حصيلتك من الأرباع والأجزاء المنجزة لحفظ وتدارس كتاب الله بانتظام.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val juzCount = quarters / 4
+                    val remainingQuarters = quarters % 4
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (juzCount > 0) {
+                                "إجمالي المـنجز: $juzCount أجزاء و $remainingQuarters ربع ($quarters ربعاً)"
+                            } else {
+                                "إجمالي المـنجز: $quarters ربعاً من القرآن الكريم"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.incrementQuranQuarters(-1) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("- ربع", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { viewModel.incrementQuranQuarters(1) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1.2f)
+                        ) {
+                            Text("+ ربع واحد", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { viewModel.incrementQuranQuarters(4) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1.2f)
+                        ) {
+                            Text("+ جزء (٤ أرباع)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Favorites Supplications Section
+        item {
+            Text(
+                text = "الأدعية والأذكار المفضلة ❤️:",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+            )
+        }
+
+        if (favoriteList.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isDark) Color.White.copy(alpha = 0.03f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "لم تقم بإضافة أي دعاء للمفضلة حتى الآن.\nاستخدم أيقونة القلب على الأدعية في قائمة الذكر لتظهر هنا!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+        } else {
+            items(favoriteList) { supp ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardColors(
+                        containerColor = if (isDark) Color(0xFF0F1E1A).copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        disabledContainerColor = Color.Transparent,
+                        disabledContentColor = Color.Transparent
+                    ),
+                    border = BorderStroke(1.dp, if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = supp,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                lineHeight = 18.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Row {
+                            IconButton(onClick = {
+                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(supp))
+                                Toast.makeText(context, "تم نسخ الدعاء الجميل بنجاح! 📋", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Default.Share, contentDescription = "نسخ الدعاء", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            }
+                            IconButton(onClick = { viewModel.removeFavoriteSupplication(supp) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "حذف من المفضلة", tint = Color.Red.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Unlocked Badges list
         item {
             Text(
@@ -1101,7 +1483,7 @@ fun StatsScreen(
                 title = "صديق القرآن",
                 desc = "قراءة ورد قرآني مستمر لأسبوع متتالٍ",
                 emoji = "🕌",
-                isUnlocked = false
+                isUnlocked = (quarters >= 12)
             )
         }
 
@@ -1472,6 +1854,111 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
                     )
+                }
+            }
+        }
+
+        // Font Size Configuration and Customizations
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                ),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "🔍 التحكم في مظهر التطبيق وحجم الخط",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "اختر حجم الخط المناسب لك لتسهيل تلاوة الأدعية والأوراد في كافة شاشات التطبيق:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("صغير", "متوسط", "كبير").forEach { size ->
+                            val isSelected = settings.appFontSizeMultiplier == size
+                            Button(
+                                onClick = { viewModel.setAppFontSize(size) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(size, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Danger Zone Resets Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "⚠️ منطقة الصيانة وإعادة التهيئة",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "يمكنك تصفير قيم العبادات اليومية أو تتبع القرآن للبدء من جديد عند الضرورة:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.resetTodayWorships() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("تصفير اليوم", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.resetQuranQuarters() },
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("تصفير الورد القرآني", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
