@@ -1,6 +1,11 @@
 package com.example.viewmodel
 
+import android.util.Log // Add Log for debugging as well, as needed.
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.ktx.Firebase
 import android.app.Application
+
 import android.content.Context
 import android.media.RingtoneManager
 import android.os.Handler
@@ -43,6 +48,7 @@ import kotlin.math.abs
 
 class WorshipViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val auth: FirebaseAuth = Firebase.auth
     private val database = WorshipDatabase.getDatabase(application)
     private val repository = WorshipRepository(database.dao())
 
