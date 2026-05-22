@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -121,76 +122,177 @@ fun MainZadContainer(
     val isAudioUnlocked by viewModel.isAudioUnlocked.collectAsStateWithLifecycle()
 
     // Host reactive toasts for family likes
+    var activeBannerMessage by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(key1 = true) {
         viewModel.notificationFlow.collectLatest { msg ->
-            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            activeBannerMessage = msg
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = if (settingsState.isDarkMode) {
-                        listOf(Color(0xFF0D2D26), Color(0xFF061512))
-                    } else {
-                        listOf(Color(0xFFECFDF5), Color(0xFFF0FDF4))
-                    }
-                )
-            )
-    ) {
-        // App Header: Islamic Date & Dynamic clock widget
-        ZadHeader(
-            settings = settingsState,
-            viewModel = viewModel,
-            onTabSelected = { currentTab = it }
-        )
+    LaunchedEffect(activeBannerMessage) {
+        if (activeBannerMessage != null) {
+            kotlinx.coroutines.delay(4500)
+            activeBannerMessage = null
+        }
+    }
 
-        // Screen Content with Animated Content transitions
-        Box(
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = if (settingsState.isDarkMode) {
+                            listOf(Color(0xFF0D2D26), Color(0xFF061512))
+                        } else {
+                            listOf(Color(0xFFECFDF5), Color(0xFFF0FDF4))
+                        }
+                    )
+                )
         ) {
-            AnimatedContent(
-                targetState = currentTab,
-                transitionSpec = {
-                    fadeIn() togetherWith fadeOut()
-                },
-                label = "tab_transitions"
-            ) { tab ->
-                when (tab) {
-                    "today" -> TodayScreen(
-                        progress = progress,
-                        prayerTimes = prayerTimes,
-                        settings = settingsState,
-                        isAudioUnlocked = isAudioUnlocked,
-                        viewModel = viewModel
-                    )
-                    "family" -> FamilyScreen(
-                        familyList = familyList,
-                        viewModel = viewModel
-                    )
-                    "stats" -> StatsScreen(
-                        streak = streakCount,
-                        history = listOf(70, 85, 90, 60, 100, 80, 95), // Completion % for the last 7 days
-                        viewModel = viewModel
-                    )
-                    "settings" -> SettingsScreen(
-                        settings = settingsState,
-                        reminders = remindersList,
-                        viewModel = viewModel
-                    )
+            // App Header: Islamic Date & Dynamic clock widget
+            ZadHeader(
+                settings = settingsState,
+                viewModel = viewModel,
+                onTabSelected = { currentTab = it }
+            )
+
+            // Screen Content with Animated Content transitions
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = {
+                        fadeIn() togetherWith fadeOut()
+                    },
+                    label = "tab_transitions"
+                ) { tab ->
+                    when (tab) {
+                        "today" -> TodayScreen(
+                            progress = progress,
+                            prayerTimes = prayerTimes,
+                            settings = settingsState,
+                            isAudioUnlocked = isAudioUnlocked,
+                            viewModel = viewModel
+                        )
+                        "family" -> FamilyScreen(
+                            familyList = familyList,
+                            viewModel = viewModel
+                        )
+                        "stats" -> StatsScreen(
+                            streak = streakCount,
+                            history = listOf(70, 85, 90, 60, 100, 80, 95), // Completion % for the last 7 days
+                            viewModel = viewModel
+                        )
+                        "settings" -> SettingsScreen(
+                            settings = settingsState,
+                            reminders = remindersList,
+                            viewModel = viewModel
+                        )
+                    }
+                }
+            }
+
+            // Bottom Navigation Bar
+            ZadBottomNavBar(
+                selectedTab = currentTab,
+                onTabSelected = { currentTab = it }
+            )
+        }
+
+        // Custom Styled Floating System Notification Banner 
+        AnimatedVisibility(
+            visible = activeBannerMessage != null,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .zIndex(999f)
+        ) {
+            activeBannerMessage?.let { message ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(
+                            1.dp,
+                            if (settingsState.isDarkMode) Color(0xFF1D5C4F).copy(alpha = 0.5f)
+                            else Color(0xFF34D399).copy(alpha = 0.5f),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable { activeBannerMessage = null },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (settingsState.isDarkMode) Color(0xEE0D2D26) else Color(0xECECFDF5)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Styled icon container
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (settingsState.isDarkMode) Color(0xFF154C40)
+                                    else Color(0xFFA7F3D0)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (message.contains("اهتزاز") || message.contains("نبض")) Icons.Default.Notifications
+                                            else if (message.contains("طاعة") || message.contains("صلوات") || message.contains("أذكار")) Icons.Default.CheckCircle
+                                            else if (message.contains("صلاة") || message.contains("🕌")) Icons.Default.Star
+                                            else Icons.Default.Info,
+                                contentDescription = null,
+                                tint = if (settingsState.isDarkMode) Color(0xFF34D399) else Color(0xFF047857),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "زاد العبادة • تنبيه مخصص",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (settingsState.isDarkMode) Color(0xFF34D399) else Color(0xFF047857)
+                                )
+                                Text(
+                                    text = "الآن",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (settingsState.isDarkMode) Color.White else Color(0xFF0F172A),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
                 }
             }
         }
-
-        // Bottom Navigation Bar
-        ZadBottomNavBar(
-            selectedTab = currentTab,
-            onTabSelected = { currentTab = it }
-        )
     }
 }
 
