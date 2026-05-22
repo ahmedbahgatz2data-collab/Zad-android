@@ -1449,7 +1449,6 @@ fun FamilyScreen(
                             FamilyMemberItemCard(
                                 member = member,
                                 onLikeClick = { viewModel.likeFamilyMember(member.id) },
-                                onSimulateWorshipClick = { viewModel.simulateWorshipForMember(member.id) },
                                 onDeleteClick = { viewModel.deleteFamilyMember(member.id) }
                             )
                         }
@@ -1546,7 +1545,6 @@ fun FamilyScreen(
 fun FamilyMemberItemCard(
     member: FamilyMember,
     onLikeClick: () -> Unit,
-    onSimulateWorshipClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
@@ -1670,26 +1668,8 @@ fun FamilyMemberItemCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.End
             ) {
-                // Simulate worship button
-                Button(
-                    onClick = onSimulateWorshipClick,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                        contentColor = MaterialTheme.colorScheme.primary
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "محاكاة طاعة ⚡",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
                 // Delete member button
                 OutlinedButton(
                     onClick = onDeleteClick,
@@ -3083,12 +3063,12 @@ fun AppWideWelcomeLoginScreen(
                     }
                 }
             },
-            confirmButton = {},
-            dismissButton = {
+            confirmButton = { 
                 TextButton(onClick = { showGoogleAuthDialog = false }) {
-                    Text("إلغاء", fontWeight = FontWeight.Bold)
+                    Text("رجوع", fontWeight = FontWeight.Bold)
                 }
-            }
+            },
+            dismissButton = null
         )
     }
 }

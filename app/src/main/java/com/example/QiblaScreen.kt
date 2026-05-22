@@ -32,29 +32,37 @@ fun QiblaScreen(settings: AppSettings) {
     var azimuth by remember { mutableStateOf(0f) }
 
     DisposableEffect(Unit) {
-        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         
         val sensorEventListener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
-                    val rotationMatrix = FloatArray(9)
-                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-                    val orientationAngles = FloatArray(3)
-                    SensorManager.getOrientation(rotationMatrix, orientationAngles)
-                    azimuth = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
-                    if (azimuth < 0) azimuth += 360f
+                try {
+                    if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                        if (event.values.size >= 3) {
+                            val rotationMatrix = FloatArray(9)
+                            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                            val orientationAngles = FloatArray(3)
+                            SensorManager.getOrientation(rotationMatrix, orientationAngles)
+                            var currentAzimuth = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
+                            if (currentAzimuth.isNaN()) currentAzimuth = 0f
+                            if (currentAzimuth < 0) currentAzimuth += 360f
+                            azimuth = currentAzimuth
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
         
         if (rotationSensor != null) {
-            sensorManager.registerListener(sensorEventListener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
+            sensorManager?.registerListener(sensorEventListener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
         }
         
         onDispose {
-            sensorManager.unregisterListener(sensorEventListener)
+            sensorManager?.unregisterListener(sensorEventListener)
         }
     }
 
@@ -68,10 +76,12 @@ fun QiblaScreen(settings: AppSettings) {
     val y = sin(dLon) * cos(meccaLat)
     val x = cos(userLat) * sin(meccaLat) - sin(userLat) * cos(meccaLat) * cos(dLon)
     var qiblaBearing = Math.toDegrees(atan2(y, x)).toFloat()
+    if (qiblaBearing.isNaN()) qiblaBearing = 0f
     if (qiblaBearing < 0) qiblaBearing += 360f
 
     // Calculate the difference so the compass points to Qibla
     var targetRotation = qiblaBearing - azimuth
+    if (targetRotation.isNaN()) targetRotation = 0f
     if (targetRotation < 0) targetRotation += 360f
 
     val animatedRotation by animateFloatAsState(

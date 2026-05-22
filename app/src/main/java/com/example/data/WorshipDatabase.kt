@@ -165,7 +165,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {
@@ -181,7 +181,7 @@ abstract class WorshipDatabase : RoomDatabase() {
                     context.applicationContext,
                     WorshipDatabase::class.java,
                     "zad_worship_db"
-                ).fallbackToDestructiveMigration(true).build()
+                ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }
