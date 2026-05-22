@@ -12,6 +12,7 @@
         android:label="@string/app_name" />
 
     <application
+        android:name=".WorshipApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

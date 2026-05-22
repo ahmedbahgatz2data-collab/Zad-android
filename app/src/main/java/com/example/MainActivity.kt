@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
     private val viewModel: WorshipViewModel by viewModels()
 
@@ -2211,6 +2212,7 @@ fun BadgeItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
@@ -2777,24 +2779,42 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("موعد التنبيه (ساعة : دقيقة):", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Text("موعد التنبيه:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    var showTimePicker by remember { mutableStateOf(false) }
+                    
+                    Button(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        OutlinedTextField(
-                            value = reminderHour.toString(),
-                            onValueChange = { reminderHour = it.toIntOrNull() ?: 12 },
-                            label = { Text("الساعة (0-23)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = reminderMinute.toString(),
-                            onValueChange = { reminderMinute = it.toIntOrNull() ?: 0 },
-                            label = { Text("الدقيقة (0-59)") },
-                            modifier = Modifier.weight(1f)
-                        )
+                        Text("اختر الوقت: ${reminderHour.toString().padStart(2, '0')}:${reminderMinute.toString().padStart(2, '0')}")
                     }
+
+                    if (showTimePicker) {
+                        val timePickerState = rememberTimePickerState(initialHour = reminderHour, initialMinute = reminderMinute)
+                        Dialog(onDismissRequest = { showTimePicker = false }) {
+                            Surface(
+                                shape = MaterialTheme.shapes.extraLarge,
+                                tonalElevation = 6.dp,
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(24.dp)) {
+                                    TimePicker(state = timePickerState)
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        TextButton(onClick = { showTimePicker = false }) { Text("إلغاء") }
+                                        TextButton(onClick = { 
+                                            reminderHour = timePickerState.hour
+                                            reminderMinute = timePickerState.minute
+                                            showTimePicker = false 
+                                        }) { Text("موافق") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))                
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("صوت التنبيه:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Row(
