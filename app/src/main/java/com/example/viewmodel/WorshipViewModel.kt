@@ -853,83 +853,105 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             var finalUserName = currentSet.googleUserName
             var finalUserAvatar = currentSet.googleUserAvatarUrl
 
-            // If not signed in to Google, we automatically sign them in with a local/default profile 
-            // so group creation STILL WORKS for them! This is a legendary user experience!
             if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
-                finalUserId = "user_${(1000..9999).random()}"
+                finalUserId = "user_${(100000..999999).random()}"
                 finalUserName = "مستخدم زاد"
                 finalUserAvatar = "avatar${(1..4).random()}"
             }
 
-            val randomCode = "ZAD-${(1000..9999).random()}"
+            // Generate a secure 6-character invite code
+            val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            val randomCode = (1..6).map { chars.random() }.joinToString("")
+            
             _notificationFlow.emit("جاري إنشاء المجموعة \"$groupName\"... ⏳")
 
-            // 1. Instantly write the complete, non-racy updated AppSettings to local Room Database!
-            val updated = currentSet.copy(
-                isGoogleSignedIn = true,
-                googleUserId = finalUserId,
-                googleUserName = finalUserName,
-                googleUserAvatarUrl = finalUserAvatar,
-                familyGroupName = groupName,
-                familyGroupInviteCode = randomCode
-            )
-            repository.saveSettings(updated)
-
-            val me = FamilyMember(
-                userId = finalUserId,
-                name = finalUserName,
-                relation = "مالك المجموعة",
-                avatarUrl = finalUserAvatar,
-                progress = currentProgress.value.calculatePercentage(),
-                lastWorship = "الآن"
-            )
-            repository.clearFamilyMembers()
-            repository.insertFamilyMembers(listOf(me))
-
-            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
-
-            // 2. Effortlessly try to push to Firestore in the background
+            // Effortlessly try to push to Firestore
             try {
-                firestore.collection("groups").document(randomCode).set(
-                    mapOf(
-                        "name" to groupName,
-                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                        "createdBy" to finalUserId
-                    )
-                ).addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        try {
-                             val meMap = mapOf(
-                                 "userId" to me.userId,
-                                 "name" to me.name,
-                                 "relation" to me.relation,
-                                 "avatarUrl" to me.avatarUrl,
-                                 "progress" to me.progress,
-                                 "likesCount" to me.likesCount,
-                                 "lastWorship" to me.lastWorship
-                             )
-                             firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(meMap)
-                             try {
-                                 firestore.collection("users").document(me.userId).set(
-                                     mapOf(
-                                         "activeGroupCode" to randomCode,
-                                         "activeGroupName" to groupName
+                firestore.collection("groups").document(randomCode).get().addOnCompleteListener { getTask ->
+                    if (getTask.isSuccessful) {
+                        val doc = getTask.result
+                        if (doc != null && doc.exists()) {
+                            // Rare code collision, in a real production app we would loop to generate a new code.
+                            // Here we just notify the user to try again.
+                            viewModelScope.launch {
+                                _notificationFlow.emit("حدث خطأ في النظام. يرجى المحاولة مرة أخرى ⚠️")
+                            }
+                            return@addOnCompleteListener
+                        }
+                        
+                        // Doc doesn't exist, safe to create
+                        firestore.collection("groups").document(randomCode).set(
+                            mapOf(
+                                "name" to groupName,
+                                "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                                "createdBy" to finalUserId
+                            )
+                        ).addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                viewModelScope.launch {
+                                    // Instantly write the complete updated AppSettings to local Room Database!
+                                    val updated = currentSet.copy(
+                                        isGoogleSignedIn = true,
+                                        googleUserId = finalUserId,
+                                        googleUserName = finalUserName,
+                                        googleUserAvatarUrl = finalUserAvatar,
+                                        familyGroupName = groupName,
+                                        familyGroupInviteCode = randomCode
+                                    )
+                                    repository.saveSettings(updated)
+
+                                    val me = FamilyMember(
+                                        userId = finalUserId,
+                                        name = finalUserName,
+                                        relation = "مالك المجموعة",
+                                        avatarUrl = finalUserAvatar,
+                                        progress = currentProgress.value.calculatePercentage(),
+                                        lastWorship = "الآن"
+                                    )
+                                    repository.clearFamilyMembers()
+                                    repository.insertFamilyMembers(listOf(me))
+
+                                    _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
+                                    
+                                     val meMap = mapOf(
+                                         "userId" to me.userId,
+                                         "name" to me.name,
+                                         "relation" to me.relation,
+                                         "avatarUrl" to me.avatarUrl,
+                                         "progress" to me.progress,
+                                         "likesCount" to me.likesCount,
+                                         "lastWorship" to me.lastWorship
                                      )
-                                 )
-                             } catch (ex: Exception) {
-                                 ex.printStackTrace()
-                             }
-                             syncProgressToCloudExplicit(currentProgress.value, randomCode)
-                             listenToFamilyUpdates(randomCode)
-                        } catch (e: Exception) {
-                            Log.e("WorshipViewModel", "Error updating Firestore member details: ${e.message}")
+                                     firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(meMap)
+                                     try {
+                                         firestore.collection("users").document(me.userId).set(
+                                             mapOf(
+                                                 "activeGroupCode" to randomCode,
+                                                 "activeGroupName" to groupName
+                                             )
+                                         )
+                                     } catch (ex: Exception) {
+                                         ex.printStackTrace()
+                                     }
+                                     syncProgressToCloudExplicit(currentProgress.value, randomCode)
+                                     listenToFamilyUpdates(randomCode)
+                                }
+                            } else {
+                                viewModelScope.launch {
+                                    _notificationFlow.emit("حدث خطأ أثناء إنشاء المجموعة. تأكد من اتصالك بالإنترنت ⚠️")
+                                }
+                            }
                         }
                     } else {
-                        Log.w("WorshipViewModel", "Firestore group creation failed, continuing in offline/local-first mode")
+                        viewModelScope.launch {
+                            _notificationFlow.emit("حدث خطأ أثناء الاتصال بالإنترنت ⚠️")
+                        }
                     }
                 }
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Firestore creation exception: ${e.message}")
+                viewModelScope.launch {
+                    _notificationFlow.emit("حدث خطأ أثناء إنشاء المجموعة ⚠️")
+                }
             }
         }
     }
@@ -1017,27 +1039,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                                 
                                 _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
                             } else {
-                                // Online check failed or not found, but we want to be supportive of offline/sandbox and mock codes!
-                                // So we join locally!
-                                val updated = updatedBase.copy(
-                                    familyGroupName = localGroupName,
-                                    familyGroupInviteCode = trimmedCode
-                                )
-                                repository.saveSettings(updated)
-                                repository.insertFamilyMembers(listOf(me))
-                                _notificationFlow.emit("تم تفعيل الانضمام المحلي لمجموعة: $localGroupName (الكود: $trimmedCode) 👥")
+                                _notificationFlow.emit("رمز الدعوة غير صحيح أو المجموعة غير موجودة ⚠️")
                             }
                         }
                     }
             } catch (e: Exception) {
-                // Instantly fallback to join locally
-                val updated = updatedBase.copy(
-                    familyGroupName = localGroupName,
-                    familyGroupInviteCode = trimmedCode
-                )
-                repository.saveSettings(updated)
-                repository.insertFamilyMembers(listOf(me))
-                _notificationFlow.emit("تم الانضمام محلياً للمجموعة العائلية بنجاح! 👥")
+                _notificationFlow.emit("حدث خطأ أثناء الاتصال. تأكد من اتصالك بالإنترنت ⚠️")
             }
         }
     }

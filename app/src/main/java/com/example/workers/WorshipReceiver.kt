@@ -12,6 +12,26 @@ import com.example.R
 
 class WorshipReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == "STOP_SOUND" || intent.action == "CLICKED_NOTIFICATION") {
+            try {
+                if (activeMediaPlayer?.isPlaying == true) {
+                    activeMediaPlayer?.stop()
+                }
+                activeMediaPlayer?.release()
+                activeMediaPlayer = null
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            
+            if (intent.action == "CLICKED_NOTIFICATION") {
+                val mainIntent = Intent(context, com.example.MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                context.startActivity(mainIntent)
+            }
+            return
+        }
+
         // Acquire PARTIAL_WAKE_LOCK & SCREEN_BRIGHT_WAKE_LOCK to ensure screen wakes up under lock screen
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
         val wakeLock = powerManager?.newWakeLock(
@@ -94,6 +114,28 @@ class WorshipReceiver : BroadcastReceiver() {
             e.printStackTrace()
         }
 
+        // Intent to stop sound and launch app when notification is clicked
+        val clickIntent = Intent(context, WorshipReceiver::class.java).apply {
+            action = "CLICKED_NOTIFICATION"
+        }
+        val contentPendingIntent = android.app.PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            clickIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Intent to stop sound when notification is deleted
+        val stopSoundIntent = Intent(context, WorshipReceiver::class.java).apply {
+            action = "STOP_SOUND"
+        }
+        val stopSoundPendingIntent = android.app.PendingIntent.getBroadcast(
+            context,
+            notificationId,
+            stopSoundIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
@@ -106,6 +148,8 @@ class WorshipReceiver : BroadcastReceiver() {
             .setLocalOnly(true)
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
+            .setContentIntent(contentPendingIntent)
+            .setDeleteIntent(stopSoundPendingIntent)
 
         // Set Full Screen Intent to wake up and display notification on lock screen
         val fullScreenIntent = Intent(context, com.example.MainActivity::class.java).apply {

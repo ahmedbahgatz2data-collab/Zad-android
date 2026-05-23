@@ -45,6 +45,12 @@ class WorshipActionReceiver : BroadcastReceiver() {
                 if (notificationId != -1) {
                     NotificationManagerCompat.from(context).cancel(notificationId)
                 }
+                
+                // Stop the sound
+                val stopSoundIntent = Intent(context, WorshipReceiver::class.java).apply {
+                    action = "STOP_SOUND"
+                }
+                context.sendBroadcast(stopSoundIntent)
             } catch (e: Exception) {
                 Log.e("WorshipActionReceiver", "Error updating progress: ${e.message}")
             }
