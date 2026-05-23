@@ -172,7 +172,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 12,
+    version = 15,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {
@@ -184,10 +184,11 @@ abstract class WorshipDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): WorshipDatabase {
             return INSTANCE ?: synchronized(this) {
+                val dbName = "zad_worship_final_v15_db"
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     WorshipDatabase::class.java,
-                    "zad_worship_db_v12"
+                    dbName
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

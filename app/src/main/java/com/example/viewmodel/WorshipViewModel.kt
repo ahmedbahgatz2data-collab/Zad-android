@@ -201,35 +201,47 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
         // Listen to progress changes and sync to cloud (with safety delay and checks)
         viewModelScope.launch {
-            currentProgress.collectLatest { progress ->
-                try {
-                    syncProgressToCloud(progress)
-                } catch (e: Exception) {
-                    Log.e("WorshipViewModel", "Error syncing progress: ${e.message}")
+            try {
+                currentProgress.collectLatest { progress ->
+                    try {
+                        syncProgressToCloud(progress)
+                    } catch (e: Exception) {
+                        Log.e("WorshipViewModel", "Error syncing progress: ${e.message}")
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Fatal error in progress collector: ${e.message}")
             }
         }
 
         // Reactively listen to family group changes
         viewModelScope.launch {
-            settings.map { it.familyGroupInviteCode }
-                .distinctUntilChanged()
-                .collectLatest { code ->
-                    if (code.isNotEmpty()) {
-                        listenToFamilyUpdates(code)
-                    } else {
-                        familyListener?.remove()
+            try {
+                settings.map { it.familyGroupInviteCode }
+                    .distinctUntilChanged()
+                    .collectLatest { code ->
+                        if (code.isNotEmpty()) {
+                            listenToFamilyUpdates(code)
+                        } else {
+                            familyListener?.remove()
+                        }
                     }
-                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Fatal error in settings collector: ${e.message}")
+            }
         }
 
         // Combine and listen to changes to automatically reschedule alarms
         viewModelScope.launch {
-            combine(prayerTimes, reminders) { _, _ ->
-                Unit
-            }.debounce(2000)
-             .collectLatest {
-                rescheduleAllAlarms()
+            try {
+                combine(prayerTimes, reminders) { _, _ ->
+                    Unit
+                }.debounce(2000)
+                 .collectLatest {
+                    rescheduleAllAlarms()
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Fatal error in alarms scheduler: ${e.message}")
             }
         }
     }
@@ -237,29 +249,51 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     private var familyListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     private fun listenToFamilyUpdates(groupCode: String) {
-        familyListener?.remove()
-        familyListener = firestore.collection("groups").document(groupCode)
-            .collection("members")
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) return@addSnapshotListener
-                snapshot?.let { querySnapshot ->
-                    val members = querySnapshot.map { doc ->
-                        FamilyMember(
-                            userId = doc.id,
-                            name = doc.getString("name") ?: "مجهول",
-                            relation = "", 
-                            avatarUrl = doc.getString("avatarUrl") ?: "avatar1",
-                            progress = doc.getDouble("progress")?.toFloat() ?: 0f,
-                            likesCount = doc.getLong("likesCount")?.toInt() ?: 0,
-                            likedByMe = false, 
-                            lastWorship = doc.getString("lastWorship") ?: ""
-                        )
+        try {
+            familyListener?.remove()
+
+            // Check if Firebase is initialized
+            val app = try {
+                com.google.firebase.FirebaseApp.getInstance()
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Firebase not initialized, skipping family listener")
+                null
+            }
+
+            if (app == null) return
+
+            familyListener = firestore.collection("groups").document(groupCode)
+                .collection("members")
+                .addSnapshotListener { snapshot, e ->
+                    if (e != null) {
+                        Log.e("WorshipViewModel", "Firestore listener error: ${e.message}")
+                        return@addSnapshotListener
                     }
-                    viewModelScope.launch {
-                        repository.insertFamilyMembers(members)
+                    snapshot?.let { querySnapshot ->
+                        val members = querySnapshot.map { doc ->
+                            FamilyMember(
+                                userId = doc.id,
+                                name = doc.getString("name") ?: "مجهول",
+                                relation = "", 
+                                avatarUrl = doc.getString("avatarUrl") ?: "avatar1",
+                                progress = doc.getDouble("progress")?.toFloat() ?: 0f,
+                                likesCount = doc.getLong("likesCount")?.toInt() ?: 0,
+                                likedByMe = false, 
+                                lastWorship = doc.getString("lastWorship") ?: ""
+                            )
+                        }
+                        viewModelScope.launch {
+                            try {
+                                repository.insertFamilyMembers(members)
+                            } catch (e: Exception) {
+                                Log.e("WorshipViewModel", "Error inserting family members from Firestore: ${e.message}")
+                            }
+                        }
                     }
                 }
-            }
+        } catch (e: Exception) {
+            Log.e("WorshipViewModel", "Error starting listenToFamilyUpdates: ${e.message}")
+        }
     }
 
     fun likeFamilyMember(targetUserId: String, targetName: String) {
@@ -290,22 +324,26 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
     private fun seedInitialDataIfNeeded() {
         viewModelScope.launch {
-            // Seed settings if missing
-            val existingSettings = repository.getSettingsImmediate()
-            if (existingSettings == null) {
-                repository.saveSettings(AppSettings())
-            }
+            try {
+                // Seed settings if missing
+                val existingSettings = repository.getSettingsImmediate()
+                if (existingSettings == null) {
+                    repository.saveSettings(AppSettings())
+                }
 
-            // Seed initial family progress
-            val list = repository.getFamilyMembers().first()
-            if (list.isEmpty()) {
-                val initialFamily = listOf(
-                    FamilyMember(userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
-                    FamilyMember(userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
-                    FamilyMember(userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
-                    FamilyMember(userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
-                )
-                repository.insertFamilyMembers(initialFamily)
+                // Seed initial family progress
+                val list = repository.getFamilyMembers().first()
+                if (list.isEmpty()) {
+                    val initialFamily = listOf(
+                        FamilyMember(userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
+                        FamilyMember(userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
+                        FamilyMember(userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
+                        FamilyMember(userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
+                    )
+                    repository.insertFamilyMembers(initialFamily)
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Error in seedInitialDataIfNeeded: ${e.message}")
             }
         }
     }
@@ -568,8 +606,16 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     // Custom Reminders Management
     fun addReminder(title: String, hour: Int, minute: Int, days: String, sound: String = "الافتراضي", repeatType: String = "ONCE", attachedWorship: String? = null) {
         viewModelScope.launch {
+            val finalTitle = if (title.isBlank() && attachedWorship != null) {
+                "تذكير: $attachedWorship"
+            } else if (title.isBlank()) {
+                "تذكير زاد"
+            } else {
+                title
+            }
+
             val newReminder = CustomReminder(
-                title = title,
+                title = finalTitle,
                 hour = hour,
                 minute = minute,
                 soundUri = sound,
@@ -597,7 +643,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateReminder(reminder: CustomReminder) {
         viewModelScope.launch {
-            repository.updateReminder(reminder)
+            val finalTitle = if (reminder.title.isBlank() && reminder.attachedWorship != null) {
+                "تذكير: ${reminder.attachedWorship}"
+            } else {
+                reminder.title
+            }
+            repository.updateReminder(reminder.copy(title = finalTitle))
             rescheduleAllAlarms(true)
         }
     }
@@ -711,17 +762,35 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             val randomCode = "ZAD-${(1000..9999).random()}"
-            val updated = currentSet.copy(
-                familyGroupName = groupName,
-                familyGroupInviteCode = randomCode
-            )
-            repository.saveSettings(updated)
-            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
             
-            // Clean local list and sync to Firestore
-            repository.insertFamilyMembers(emptyList())
-            syncProgressToCloud(currentProgress.value)
-            listenToFamilyUpdates(randomCode)
+            try {
+                firestore.collection("groups").document(randomCode).set(
+                    mapOf(
+                        "name" to groupName,
+                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                        "createdBy" to currentSet.googleUserId
+                    )
+                ).addOnSuccessListener {
+                    viewModelScope.launch {
+                        val updated = currentSet.copy(
+                            familyGroupName = groupName,
+                            familyGroupInviteCode = randomCode
+                        )
+                        repository.saveSettings(updated)
+                        _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
+                        
+                        repository.insertFamilyMembers(emptyList())
+                        syncProgressToCloud(currentProgress.value)
+                        listenToFamilyUpdates(randomCode)
+                    }
+                }.addOnFailureListener { e ->
+                    viewModelScope.launch {
+                        _notificationFlow.emit("فشل في إنشاء المجموعة: ${e.message} ❌")
+                    }
+                }
+            } catch (e: Exception) {
+                _notificationFlow.emit("حدث خطأ تقني أثناء إنشاء المجموعة ❌")
+            }
         }
     }
 
@@ -733,27 +802,37 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             val trimmedCode = inviteCode.trim().uppercase()
-            if (trimmedCode.startsWith("ZAD-") && (trimmedCode.length == 7 || trimmedCode.length == 8)) {
-                val groupName = if (trimmedCode.contains("580")) "Home" else when ((trimmedCode.takeLast(3).toIntOrNull() ?: 1) % 5) {
-                    0 -> "عائلة الهاشمي"
-                    1 -> "عائلة المنصوري"
-                    2 -> "دائرة الأهل الروحية"
-                    3 -> "أهل الجنة"
-                    else -> "عائلة الخير"
-                }
-                val updated = currentSet.copy(
-                    familyGroupName = groupName,
-                    familyGroupInviteCode = trimmedCode
-                )
-                repository.saveSettings(updated)
-                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
-                
-                // Clean local list and join Firestore
-                repository.insertFamilyMembers(emptyList())
-                syncProgressToCloud(currentProgress.value)
-                listenToFamilyUpdates(trimmedCode)
-            } else {
-                _notificationFlow.emit("كود الدعوة غير صالح! الرجاء إدخال كود بالصيغة ZAD-XXXX ❌")
+            if (trimmedCode.isEmpty()) return@launch
+
+            try {
+                firestore.collection("groups").document(trimmedCode).get()
+                    .addOnSuccessListener { doc ->
+                        if (doc.exists()) {
+                            val groupName = doc.getString("name") ?: "مجموعة زاد"
+                            viewModelScope.launch {
+                                val updated = currentSet.copy(
+                                    familyGroupName = groupName,
+                                    familyGroupInviteCode = trimmedCode
+                                )
+                                repository.saveSettings(updated)
+                                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
+                                
+                                repository.insertFamilyMembers(emptyList())
+                                syncProgressToCloud(currentProgress.value)
+                                listenToFamilyUpdates(trimmedCode)
+                            }
+                        } else {
+                            viewModelScope.launch {
+                                _notificationFlow.emit("عذراً، كود المجموعة غير صحيح أو المجموعة غير موجودة ❌")
+                            }
+                        }
+                    }.addOnFailureListener { e ->
+                        viewModelScope.launch {
+                            _notificationFlow.emit("فشل في الانضمام: ${e.message} ❌")
+                        }
+                    }
+            } catch (e: Exception) {
+                _notificationFlow.emit("حدث خطأ تقني أثناء الانضمام للمجموعة ❌")
             }
         }
     }
@@ -887,16 +966,45 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun unlockAudioAndPlayPreview() {
         _isAudioUnlocked.update { true }
         try {
-            val defaultUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val ringtone = RingtoneManager.getRingtone(getApplication(), defaultUri)
-            ringtone?.play()
+            val set = settings.value
+            val uriStr = set.customAdhanSoundUri
             
+            val uri = if (uriStr != "default" && uriStr.isNotEmpty()) {
+                android.net.Uri.parse(uriStr)
+            } else {
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            }
+            
+            // Using a temporary MediaPlayer to play the sound for preview
+            val mediaPlayer = android.media.MediaPlayer().apply {
+                setDataSource(getApplication(), uri)
+                prepare()
+                start()
+            }
+            
+            // Auto stop after 20 seconds for preview to not disturb but still feel like Adhan
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    if (mediaPlayer.isPlaying) mediaPlayer.stop()
+                    mediaPlayer.release()
+                } catch (e: Exception) {}
+            }, 20000)
+
             viewModelScope.launch {
-                _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة التنبيه بنجاح! 🔊")
+                _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة صوت الأذان المختار بنجاح! 🔊")
             }
             triggerStandardVibration()
         } catch (e: Throwable) {
             e.printStackTrace()
+            // Fallback to simple ringtone if direct URI fails
+            try {
+                val ringtone = RingtoneManager.getRingtone(getApplication(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                ringtone?.play()
+            } catch (ex: Exception) {}
+            
+            viewModelScope.launch {
+                _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة التنبيه الافتراضي. 🔊")
+            }
         }
     }
 
@@ -1022,16 +1130,58 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Modern Alarm Scheduling Logic
-    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int, sound: String = "default", attachedWorship: String? = null) {
+    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int, sound: String = "default", attachedWorship: String? = null, repeatDays: String = "") {
         val application = getApplication<Application>()
         val alarmManager = application.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
         
+        val now = Calendar.getInstance()
         val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
-            if (before(Calendar.getInstance())) {
-                add(Calendar.DAY_OF_YEAR, 1)
+            set(Calendar.MILLISECOND, 0)
+        }
+
+        // If specific days are provided, find the closest upcoming day that is selected
+        if (repeatDays.isNotEmpty() && repeatDays != "السبت, الأحد, الاثنين, الثلاثاء, الأربعاء, الخميس, الجمعة") {
+            val selectedDays = repeatDays.split(",").map { it.trim() }
+            val dayNamesAr = arrayOf("الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت")
+            
+            // Check if today is one of the selected days and it hasn't passed yet
+            var daysToAdd = 0
+            var found = false
+            
+            for (i in 0..7) {
+                val checkCal = Calendar.getInstance().apply {
+                    timeInMillis = calendar.timeInMillis
+                    add(Calendar.DAY_OF_YEAR, i)
+                }
+                val dayOfWeek = checkCal.get(Calendar.DAY_OF_WEEK) // 1=Sunday
+                val dayName = dayNamesAr[dayOfWeek - 1]
+                
+                if (selectedDays.contains(dayName)) {
+                    if (i == 0 && checkCal.before(now)) {
+                        // Today was selected but time already passed
+                        continue
+                    }
+                    daysToAdd = i
+                    found = true
+                    break
+                }
+            }
+            
+            if (found) {
+                calendar.add(Calendar.DAY_OF_YEAR, daysToAdd)
+            } else {
+                // Should not happen if at least one day is selected
+                if (calendar.before(now)) {
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                }
+            }
+        } else {
+            // General daily or once logic
+            if (calendar.before(now)) {
+                calendar.add(Calendar.DAY_OF_YEAR, 1)
             }
         }
 
@@ -1117,7 +1267,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         reminder.minute,
                         reminder.id,
                         reminder.soundUri,
-                        reminder.attachedWorship
+                        reminder.attachedWorship,
+                        reminder.repeatDays
                     )
                 }
                 

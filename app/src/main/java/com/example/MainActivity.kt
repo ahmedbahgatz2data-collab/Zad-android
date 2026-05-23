@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -65,6 +66,39 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerWrapper(
+    initialHour: Int,
+    initialMinute: Int,
+    onTimeSelected: (Int, Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val timePickerState = rememberTimePickerState(initialHour = initialHour, initialMinute = initialMinute)
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { 
+                onTimeSelected(timePickerState.hour, timePickerState.minute)
+                onDismiss()
+            }) {
+                Text("تأكيد")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء")
+            }
+        },
+        text = {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                TimePicker(state = timePickerState)
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 class MainActivity : ComponentActivity() {
     private val viewModel: WorshipViewModel by viewModels()
 
@@ -2211,7 +2245,7 @@ fun BadgeItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
@@ -2234,6 +2268,8 @@ fun SettingsScreen(
 
     var showAddReminderDialog by remember { mutableStateOf(false) }
     var editingReminder by remember { mutableStateOf<CustomReminder?>(null) }
+    
+    var showTimePickerFor by remember { mutableStateOf<String?>(null) } // fajr, shurouq, dhuhr, asr, maghrib, isha
 
     // Forms for setting inputs
     var reminderTitle by remember { mutableStateOf("") }
@@ -2241,7 +2277,29 @@ fun SettingsScreen(
     var reminderMinute by remember { mutableStateOf(0) }
     var reminderSound by remember { mutableStateOf("الافتراضي") }
     var reminderRepeatType by remember { mutableStateOf("DAILY") }
+    var reminderRepeatDays by remember { mutableStateOf("السبت, الأحد, الاثنين, الثلاثاء, الأربعاء, الخميس, الجمعة") }
     var attachedWorship by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(editingReminder) {
+        editingReminder?.let {
+            reminderTitle = it.title
+            reminderHour = it.hour
+            reminderMinute = it.minute
+            reminderSound = it.soundUri
+            reminderRepeatType = it.repeatType
+            reminderRepeatDays = it.repeatDays
+            attachedWorship = it.attachedWorship ?: "بدون ربط"
+        } ?: run {
+            // Reset for new reminder
+            reminderTitle = ""
+            reminderHour = 19
+            reminderMinute = 0
+            reminderSound = "الافتراضي"
+            reminderRepeatType = "DAILY"
+            reminderRepeatDays = "السبت, الأحد, الاثنين, الثلاثاء, الأربعاء, الخميس, الجمعة"
+            attachedWorship = "بدون ربط"
+        }
+    }
 
     val worshipOptions = listOf("بدون ربط", "الفجر", "الظهر", "العصر", "المغرب", "العشاء", "أذكار الصباح", "أذكار المساء", "ورد القرآن")
 
@@ -2333,75 +2391,122 @@ fun SettingsScreen(
 
                         // Manual offset times input display setup
                         Spacer(modifier = Modifier.height(10.dp))
+                        
+                        if (showTimePickerFor != null) {
+                            val target = showTimePickerFor ?: ""
+                            val currentTime = when(target) {
+                                "fajr" -> settings.manualFajr
+                                "shurouq" -> settings.manualShurouq
+                                "dhuhr" -> settings.manualDhuhr
+                                "asr" -> settings.manualAsr
+                                "maghrib" -> settings.manualMaghrib
+                                "isha" -> settings.manualIsha
+                                else -> "00:00"
+                            }
+                            val parts = currentTime.split(":")
+                            val h = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                            val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                            
+                            TimePickerWrapper(
+                                initialHour = h,
+                                initialMinute = m,
+                                onTimeSelected = { hour, minute ->
+                                    val formatted = String.format(Locale.US, "%02d:%02d", hour, minute)
+                                    when(target) {
+                                        "fajr" -> viewModel.updateManualPrayerTimes(formatted, settings.manualShurouq, settings.manualDhuhr, settings.manualAsr, settings.manualMaghrib, settings.manualIsha)
+                                        "shurouq" -> viewModel.updateManualPrayerTimes(settings.manualFajr, formatted, settings.manualDhuhr, settings.manualAsr, settings.manualMaghrib, settings.manualIsha)
+                                        "dhuhr" -> viewModel.updateManualPrayerTimes(settings.manualFajr, settings.manualShurouq, formatted, settings.manualAsr, settings.manualMaghrib, settings.manualIsha)
+                                        "asr" -> viewModel.updateManualPrayerTimes(settings.manualFajr, settings.manualShurouq, settings.manualDhuhr, formatted, settings.manualMaghrib, settings.manualIsha)
+                                        "maghrib" -> viewModel.updateManualPrayerTimes(settings.manualFajr, settings.manualShurouq, settings.manualDhuhr, settings.manualAsr, formatted, settings.manualIsha)
+                                        "isha" -> viewModel.updateManualPrayerTimes(settings.manualFajr, settings.manualShurouq, settings.manualDhuhr, settings.manualAsr, settings.manualMaghrib, formatted)
+                                    }
+                                    showTimePickerFor = null // Reset after selection
+                                },
+                                onDismiss = { showTimePickerFor = null }
+                            )
+                        }
+
                         Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = settings.manualFajr,
-                                    onValueChange = {
-                                        viewModel.updateManualPrayerTimes(
-                                            it, settings.manualShurouq, settings.manualDhuhr,
-                                            settings.manualAsr, settings.manualMaghrib, settings.manualIsha
-                                        )
-                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
                                     label = { Text("الفجر", fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).clickable { showTimePickerFor = "fajr" },
+                                    enabled = false,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
                                 )
                                 OutlinedTextField(
                                     value = settings.manualShurouq,
-                                    onValueChange = {
-                                        viewModel.updateManualPrayerTimes(
-                                            settings.manualFajr, it, settings.manualDhuhr,
-                                            settings.manualAsr, settings.manualMaghrib, settings.manualIsha
-                                        )
-                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
                                     label = { Text("الشروق", fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).clickable { showTimePickerFor = "shurouq" },
+                                    enabled = false,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
                                 )
                                 OutlinedTextField(
                                     value = settings.manualDhuhr,
-                                    onValueChange = {
-                                        viewModel.updateManualPrayerTimes(
-                                            settings.manualFajr, settings.manualShurouq, it,
-                                            settings.manualAsr, settings.manualMaghrib, settings.manualIsha
-                                        )
-                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
                                     label = { Text("الظهر", fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).clickable { showTimePickerFor = "dhuhr" },
+                                    enabled = false,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
                                 )
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = settings.manualAsr,
-                                    onValueChange = {
-                                        viewModel.updateManualPrayerTimes(
-                                            settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
-                                            it, settings.manualMaghrib, settings.manualIsha
-                                        )
-                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
                                     label = { Text("العصر", fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).clickable { showTimePickerFor = "asr" },
+                                    enabled = false,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
                                 )
                                 OutlinedTextField(
                                     value = settings.manualMaghrib,
-                                    onValueChange = {
-                                        viewModel.updateManualPrayerTimes(
-                                            settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
-                                            settings.manualAsr, it, settings.manualIsha
-                                        )
-                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
                                     label = { Text("المغرب", fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).clickable { showTimePickerFor = "maghrib" },
+                                    enabled = false,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
                                 )
                                 OutlinedTextField(
                                     value = settings.manualIsha,
-                                    onValueChange = {
-                                        viewModel.updateManualPrayerTimes(
-                                            settings.manualFajr, settings.manualShurouq, settings.manualDhuhr,
-                                            settings.manualAsr, settings.manualMaghrib, it
-                                        )
-                                    },
+                                    onValueChange = {},
+                                    readOnly = true,
                                     label = { Text("العشاء", fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f).clickable { showTimePickerFor = "isha" },
+                                    enabled = false,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
+                                        disabledBorderColor = MaterialTheme.colorScheme.outline
+                                    )
                                 )
                             }
                         }
@@ -2478,6 +2583,14 @@ fun SettingsScreen(
                         ) {
                             Text("تجربة التنبيه", fontSize = 11.sp, maxLines = 1)
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.unlockAudioAndPlayPreview() },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("test_adhan_btn")
+                        ) {
+                            Text("تجربة الأذان", fontSize = 11.sp, maxLines = 1)
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -2506,15 +2619,7 @@ fun SettingsScreen(
                                     onToggle = { viewModel.toggleReminder(r) },
                                     onDelete = { viewModel.deleteReminder(r.id) },
                                     onEdit = {
-                                        editingReminder?.let {
-                                            reminderTitle = it.title
-                                            reminderHour = it.hour
-                                            reminderMinute = it.minute
-                                            reminderSound = it.soundUri
-                                            reminderRepeatType = it.repeatType
-                                            attachedWorship = it.attachedWorship ?: "بدون ربط"
-                                        }
-                                        showAddReminderDialog = true
+                                        editingReminder = r
                                     }
                                 )
                             }
@@ -2800,7 +2905,8 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (reminderTitle.isNotBlank()) {
+                        val isTitleValid = reminderTitle.isNotBlank() || (attachedWorship != "بدون ربط" && attachedWorship != null)
+                        if (isTitleValid) {
                             if (isEdit) {
                                 editingReminder?.let {
                                     viewModel.updateReminder(it.copy(
@@ -2809,6 +2915,7 @@ fun SettingsScreen(
                                         minute = reminderMinute,
                                         soundUri = reminderSound,
                                         repeatType = reminderRepeatType,
+                                        repeatDays = reminderRepeatDays,
                                         attachedWorship = if (attachedWorship == "بدون ربط") null else attachedWorship
                                     ))
                                 }
@@ -2817,7 +2924,7 @@ fun SettingsScreen(
                                     title = reminderTitle,
                                     hour = reminderHour,
                                     minute = reminderMinute,
-                                    days = "يومي",
+                                    days = reminderRepeatDays,
                                     sound = reminderSound,
                                     repeatType = reminderRepeatType,
                                     attachedWorship = if (attachedWorship == "بدون ربط") null else attachedWorship
@@ -2825,8 +2932,8 @@ fun SettingsScreen(
                             }
                             showAddReminderDialog = false
                             editingReminder = null
-                            reminderTitle = ""
-                            reminderSound = "الافتراضي"
+                        } else {
+                            Toast.makeText(context, "الرجاء إدخال عنوان أو اختيار عبادة مرتبطة", Toast.LENGTH_SHORT).show()
                         }
                     }
                 ) {
@@ -2893,6 +3000,32 @@ fun SettingsScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("نغمة 🎵")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("أيام التكرار:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    val daysList = listOf("السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة")
+                    val currentSelectedDays = reminderRepeatDays.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+                    
+                    androidx.compose.foundation.layout.FlowRow(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        daysList.forEach { day ->
+                            val isDaySelected = currentSelectedDays.contains(day)
+                            FilterChip(
+                                selected = isDaySelected,
+                                onClick = {
+                                    if (isDaySelected) {
+                                        currentSelectedDays.remove(day)
+                                    } else {
+                                        currentSelectedDays.add(day)
+                                    }
+                                    reminderRepeatDays = currentSelectedDays.joinToString(", ")
+                                },
+                                label = { Text(day, fontSize = 9.sp) }
+                            )
                         }
                     }
 
