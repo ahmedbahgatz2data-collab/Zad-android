@@ -65,12 +65,15 @@ data class CustomReminder(
     val minute: Int,
     val isEnabled: Boolean = true,
     val soundUri: String = "default", // Custom sound selection
-    val repeatDays: String = "السبت, الأحد, الاثنين, الثلاثاء, الأربعاء, الخميس, الجمعة" // comma-separated Days
+    val repeatDays: String = "السبت, الأحد, الاثنين, الثلاثاء, الأربعاء, الخميس, الجمعة", // comma-separated Days
+    val repeatType: String = "ONCE", // "ONCE", "DAILY", "WEEKLY"
+    val attachedWorship: String? = null // e.g. "صلاة الفجر"
 )
 
 @Entity(tableName = "family_sync")
 data class FamilyMember(
     @PrimaryKey val id: Int,
+    val userId: String = "",
     val name: String,
     val relation: String,
     val avatarUrl: String,
@@ -94,6 +97,7 @@ data class AppSettings(
     val manualMaghrib: String = "06:50 م",
     val manualIsha: String = "08:20 م",
     val isAdhanSoundEnabled: Boolean = true,
+    val customAdhanSoundUri: String = "default",
     val dstOffsetHours: Int = 0,
     val selectedReciter: String = "الشيخ عبد الباسط",
     

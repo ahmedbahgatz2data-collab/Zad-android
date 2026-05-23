@@ -38,6 +38,7 @@
         </activity>
         
         <receiver android:name=".workers.WorshipReceiver" android:exported="false" />
+        <receiver android:name=".workers.WorshipActionReceiver" android:exported="false" />
     </application>
 
 </manifest>

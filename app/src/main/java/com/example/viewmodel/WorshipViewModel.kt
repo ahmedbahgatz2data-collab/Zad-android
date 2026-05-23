@@ -3,6 +3,8 @@ package com.example.viewmodel
 import android.util.Log // Add Log for debugging as well, as needed.
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.firestore
 import com.google.firebase.Firebase
 import android.app.Application
 
@@ -56,6 +58,7 @@ import kotlin.math.abs
 class WorshipViewModel(application: Application) : AndroidViewModel(application) {
 
     private val auth: FirebaseAuth by lazy { Firebase.auth }
+    private val firestore: FirebaseFirestore by lazy { Firebase.firestore }
     private val database = WorshipDatabase.getDatabase(application)
     private val repository = WorshipRepository(database.dao())
 
@@ -193,19 +196,78 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     )
 
     init {
-        // Mock simulation removed based on real conditions
+        // Listen to progress changes and sync to cloud
         viewModelScope.launch {
-            val existingSettings = repository.getSettingsImmediate()
-            if (existingSettings == null) {
-                repository.saveSettings(AppSettings())
+            currentProgress.collectLatest { progress ->
+                syncProgressToCloud(progress)
             }
+        }
 
-            // Combine and listen to changes to automatically reschedule alarms
+        // Start listening to family group if already joined
+        viewModelScope.launch {
+            val s = settings.first()
+            if (s.familyGroupInviteCode.isNotEmpty()) {
+                listenToFamilyUpdates(s.familyGroupInviteCode)
+            }
+        }
+
+        // Combine and listen to changes to automatically reschedule alarms
+        viewModelScope.launch {
             combine(prayerTimes, reminders) { _, _ ->
                 Unit
             }.debounce(1500)
              .collectLatest {
                 rescheduleAllAlarms()
+            }
+        }
+    }
+
+    private var familyListener: com.google.firebase.firestore.ListenerRegistration? = null
+
+    private fun listenToFamilyUpdates(groupCode: String) {
+        familyListener?.remove()
+        familyListener = firestore.collection("groups").document(groupCode)
+            .collection("members")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) return@addSnapshotListener
+                snapshot?.let { querySnapshot ->
+                    val members = querySnapshot.mapIndexed { index, doc ->
+                        FamilyMember(
+                            id = index, // Room ID
+                            userId = doc.id,
+                            name = doc.getString("name") ?: "مجهول",
+                            relation = "", 
+                            avatarUrl = doc.getString("avatarUrl") ?: "avatar1",
+                            progress = doc.getDouble("progress")?.toFloat() ?: 0f,
+                            likesCount = doc.getLong("likesCount")?.toInt() ?: 0,
+                            likedByMe = false, 
+                            lastWorship = doc.getString("lastWorship") ?: ""
+                        )
+                    }
+                    viewModelScope.launch {
+                        repository.insertFamilyMembers(members)
+                    }
+                }
+            }
+    }
+
+    fun likeFamilyMember(targetUserId: String, targetName: String) {
+        viewModelScope.launch {
+            val set = settings.value
+            if (!set.isGoogleSignedIn || set.familyGroupInviteCode.isEmpty()) return@launch
+            
+            val groupCode = set.familyGroupInviteCode
+            val memberRef = firestore.collection("groups").document(groupCode)
+                .collection("members").document(targetUserId)
+            
+            firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(memberRef)
+                val currentLikes = snapshot.getLong("likesCount") ?: 0
+                transaction.update(memberRef, "likesCount", currentLikes + 1)
+            }.addOnSuccessListener {
+                viewModelScope.launch {
+                    _notificationFlow.emit("أرسلت إعجاباً لـ $targetName! ❤️")
+                }
             }
         }
     }
@@ -227,13 +289,50 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             val list = repository.getFamilyMembers().first()
             if (list.isEmpty()) {
                 val initialFamily = listOf(
-                    FamilyMember(1, "أحمد (الأخ)", "الأخ", "avatar1", 88f, 12, false, "صلاة العصر"),
-                    FamilyMember(2, "أميرة (الوالدة)", "الأم", "avatar2", 100f, 34, false, "الورد اليومي"),
-                    FamilyMember(3, "محمد (الأب)", "الأب", "avatar3", 77f, 9, false, "أذكار الصباح"),
-                    FamilyMember(4, "فاطمة (الأخت)", "الأخت", "avatar4", 55f, 15, false, "صلاة الظهر")
+                    FamilyMember(id = 1, userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
+                    FamilyMember(id = 2, userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
+                    FamilyMember(id = 3, userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
+                    FamilyMember(id = 4, userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
                 )
                 repository.insertFamilyMembers(initialFamily)
             }
+        }
+    }
+
+    // Sync current progress to Firestore if in a group
+    private fun syncProgressToCloud(progress: WorshipProgress) {
+        val set = settings.value
+        if (set.isGoogleSignedIn && set.familyGroupInviteCode.isNotEmpty()) {
+            val userId = set.googleUserId
+            val groupCode = set.familyGroupInviteCode
+            val percentage = progress.calculatePercentage()
+            
+            val membersRef = firestore.collection("groups").document(groupCode).collection("members")
+            
+            // Find what was the last worship completed
+            val lastWorship = when {
+                progress.quranRead -> "ورد القرآن"
+                progress.adhkarEvening -> "أذكار المساء"
+                progress.adhkarMorning -> "أذكار الصباح"
+                progress.isha -> "صلاة العشاء"
+                progress.maghrib -> "صلاة المغرب"
+                progress.asr -> "صلاة العصر"
+                progress.dhuhr -> "صلاة الظهر"
+                progress.fajr -> "صلاة الفجر"
+                else -> ""
+            }
+
+            membersRef.document(userId).set(
+                mapOf(
+                    "userId" to userId,
+                    "name" to set.googleUserName,
+                    "avatarUrl" to set.googleUserAvatarUrl,
+                    "progress" to percentage,
+                    "lastWorship" to lastWorship,
+                    "lastUpdated" to System.currentTimeMillis()
+                ),
+                com.google.firebase.firestore.SetOptions.merge()
+            )
         }
     }
 
@@ -241,63 +340,81 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun toggleFajr() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(fajr = !current.fajr))
+            val updated = current.copy(fajr = !current.fajr)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleDhuhr() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(dhuhr = !current.dhuhr))
+            val updated = current.copy(dhuhr = !current.dhuhr)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleAsr() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(asr = !current.asr))
+            val updated = current.copy(asr = !current.asr)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleMaghrib() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(maghrib = !current.maghrib))
+            val updated = current.copy(maghrib = !current.maghrib)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleIsha() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(isha = !current.isha))
+            val updated = current.copy(isha = !current.isha)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleAdhkarMorning() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(adhkarMorning = !current.adhkarMorning))
+            val updated = current.copy(adhkarMorning = !current.adhkarMorning)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleAdhkarEvening() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(adhkarEvening = !current.adhkarEvening))
+            val updated = current.copy(adhkarEvening = !current.adhkarEvening)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleQuranRead() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(quranRead = !current.quranRead))
+            val updated = current.copy(quranRead = !current.quranRead)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahPrayed() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahPrayed = !current.sunnahPrayed))
+            val updated = current.copy(sunnahPrayed = !current.sunnahPrayed)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
@@ -305,49 +422,63 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun toggleSunnahFajr() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahFajr = !current.sunnahFajr))
+            val updated = current.copy(sunnahFajr = !current.sunnahFajr)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahDuha() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahDuha = !current.sunnahDuha))
+            val updated = current.copy(sunnahDuha = !current.sunnahDuha)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahDhuhrQabli() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahDhuhrQabli = !current.sunnahDhuhrQabli))
+            val updated = current.copy(sunnahDhuhrQabli = !current.sunnahDhuhrQabli)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahDhuhrBadi() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahDhuhrBadi = !current.sunnahDhuhrBadi))
+            val updated = current.copy(sunnahDhuhrBadi = !current.sunnahDhuhrBadi)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahMaghrib() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahMaghrib = !current.sunnahMaghrib))
+            val updated = current.copy(sunnahMaghrib = !current.sunnahMaghrib)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahIsha() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahIsha = !current.sunnahIsha))
+            val updated = current.copy(sunnahIsha = !current.sunnahIsha)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
     fun toggleSunnahQiyam() {
         viewModelScope.launch {
             val current = currentProgress.value
-            repository.insertOrUpdateProgress(current.copy(sunnahQiyam = !current.sunnahQiyam))
+            val updated = current.copy(sunnahQiyam = !current.sunnahQiyam)
+            repository.insertOrUpdateProgress(updated)
+            syncProgressToCloud(updated)
         }
     }
 
@@ -418,7 +549,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Custom Reminders Management
-    fun addReminder(title: String, hour: Int, minute: Int, days: String, sound: String = "الافتراضي") {
+    fun addReminder(title: String, hour: Int, minute: Int, days: String, sound: String = "الافتراضي", repeatType: String = "ONCE", attachedWorship: String? = null) {
         viewModelScope.launch {
             val newReminder = CustomReminder(
                 title = title,
@@ -426,6 +557,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 minute = minute,
                 soundUri = sound,
                 repeatDays = days,
+                repeatType = repeatType,
+                attachedWorship = attachedWorship,
                 isEnabled = true
             )
             repository.insertReminder(newReminder)
@@ -449,6 +582,24 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.updateReminder(reminder)
             rescheduleAllAlarms(true)
+        }
+    }
+
+    fun updateCustomAdhanSound(uri: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(customAdhanSoundUri = uri))
+            _notificationFlow.emit("تم تحديث صوت الأذان بنجاح! 🔊")
+        }
+    }
+
+    fun updateFamilyGroupName(newName: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            if (currentSet.familyGroupInviteCode.isNotEmpty()) {
+                repository.saveSettings(currentSet.copy(familyGroupName = newName))
+                _notificationFlow.emit("تم تغيير اسم المجموعة إلى: $newName 👥")
+            }
         }
     }
 
@@ -525,6 +676,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             )
             repository.saveSettings(updated)
             _notificationFlow.emit("مرحبًا بك يا $name! تم تسجيل الدخول بنجاح عبر Google. 🟢")
+            
+            // If already in a group, sync immediately
+            if (updated.familyGroupInviteCode.isNotEmpty()) {
+                syncProgressToCloud(currentProgress.value)
+                listenToFamilyUpdates(updated.familyGroupInviteCode)
+            }
         }
     }
 
@@ -550,6 +707,10 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun createFamilyGroup(groupName: String) {
         viewModelScope.launch {
             val currentSet = settings.value
+            if (!currentSet.isGoogleSignedIn) {
+                _notificationFlow.emit("يجب تسجيل الدخول أولاً لإنشاء مجموعة ⚠️")
+                return@launch
+            }
             val randomCode = "ZAD-${(1000..9999).random()}"
             val updated = currentSet.copy(
                 familyGroupName = groupName,
@@ -558,18 +719,22 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             repository.saveSettings(updated)
             _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
             
-            // Start empty to let user add actual real-world family members manually
+            // Clean local list and sync to Firestore
             repository.insertFamilyMembers(emptyList())
+            syncProgressToCloud(currentProgress.value)
+            listenToFamilyUpdates(randomCode)
         }
     }
 
     fun joinFamilyGroup(inviteCode: String) {
         viewModelScope.launch {
+            val currentSet = settings.value
+            if (!currentSet.isGoogleSignedIn) {
+                _notificationFlow.emit("يجب تسجيل الدخول أولاً للانضمام لمجموعة ⚠️")
+                return@launch
+            }
             val trimmedCode = inviteCode.trim().uppercase()
-            // Support codes like ZAD-580 or ZAD-5800 (length 7 or 8)
             if (trimmedCode.startsWith("ZAD-") && (trimmedCode.length == 7 || trimmedCode.length == 8)) {
-                val currentSet = settings.value
-                // If it contains 580 or 5800, name it "Home" as requested
                 val groupName = if (trimmedCode.contains("580")) "Home" else when ((trimmedCode.takeLast(3).toIntOrNull() ?: 1) % 5) {
                     0 -> "عائلة الهاشمي"
                     1 -> "عائلة المنصوري"
@@ -582,10 +747,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     familyGroupInviteCode = trimmedCode
                 )
                 repository.saveSettings(updated)
-                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢 يمكنك الآن إضافة أفراد عائلتك.")
+                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
                 
-                // Start empty to let user add actual real-world family members manually
+                // Clean local list and join Firestore
                 repository.insertFamilyMembers(emptyList())
+                syncProgressToCloud(currentProgress.value)
+                listenToFamilyUpdates(trimmedCode)
             } else {
                 _notificationFlow.emit("كود الدعوة غير صالح! الرجاء إدخال كود بالصيغة ZAD-XXXX ❌")
             }
@@ -858,7 +1025,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Modern Alarm Scheduling Logic
-    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int, sound: String = "default") {
+    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int, sound: String = "default", attachedWorship: String? = null) {
         val application = getApplication<Application>()
         val alarmManager = application.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
         
@@ -876,6 +1043,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             putExtra("MESSAGE", message)
             putExtra("ID", id)
             putExtra("SOUND", sound)
+            putExtra("ATTACHED_WORSHIP", attachedWorship)
         }
 
         val pendingIntent = android.app.PendingIntent.getBroadcast(
@@ -927,6 +1095,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     "العشاء" to currentPrayerTimes.isha
                 )
 
+                val adhanSound = settings.value.customAdhanSoundUri
+
                 prayers.forEachIndexed { index, (name, time) ->
                     val parts = parseTime(time)
                     if (parts != null) {
@@ -935,7 +1105,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                             "تقبل الله منك صالح الأعمال، حان الآن موعد أذان $name.",
                             parts.first,
                             parts.second,
-                            index + 1000 // Offset for prayer IDs
+                            index + 1000, // Offset for prayer IDs
+                            adhanSound
                         )
                     }
                 }
@@ -948,7 +1119,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         reminder.hour,
                         reminder.minute,
                         reminder.id,
-                        reminder.soundUri
+                        reminder.soundUri,
+                        reminder.attachedWorship
                     )
                 }
                 

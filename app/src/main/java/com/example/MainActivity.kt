@@ -178,6 +178,24 @@ fun MainZadContainer(
                 onTabSelected = { currentTab = it }
             )
 
+            // Audio URI handling for persistent permissions
+            val athanPickerLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                uri?.let {
+                    try {
+                        context.contentResolver.takePersistableUriPermission(
+                            it,
+                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                        viewModel.updateCustomAdhanSound(it.toString())
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(context, "حدث خطأ في حفظ الملف، تأكد من اختيار ملف صالح.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+
             // Screen Content with Animated Content transitions
             Box(
                 modifier = Modifier
@@ -212,7 +230,10 @@ fun MainZadContainer(
                         "settings" -> SettingsScreen(
                             settings = settingsState,
                             reminders = remindersList,
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            onPickAthanSound = {
+                                athanPickerLauncher.launch(arrayOf("audio/*"))
+                            }
                         )
                     }
                 }
@@ -1307,72 +1328,43 @@ fun FamilyScreen(
             }
         } else {
             // Signed In Family Circle view
+            var showRenameDialog by remember { mutableStateOf(false) }
+            var newGroupName by remember { mutableStateOf(settings.familyGroupName) }
+
+            if (showRenameDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRenameDialog = false },
+                    title = { Text("تعديل اسم المجموعة", fontWeight = FontWeight.Bold) },
+                    text = {
+                        OutlinedTextField(
+                            value = newGroupName,
+                            onValueChange = { newGroupName = it },
+                            label = { Text("اسم المجموعة الجديد") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            viewModel.updateFamilyGroupName(newGroupName)
+                            showRenameDialog = false
+                        }) {
+                            Text("حفظ")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRenameDialog = false }) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // User Google Profile Card
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                        ),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = settings.googleUserName.take(1).uppercase(),
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = settings.googleUserName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = settings.googleUserEmail,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.Gray
-                                    )
-                                }
-                            }
-                            
-                            OutlinedButton(
-                                onClick = { viewModel.signOutGoogle() },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
-                                border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.3f))
-                            ) {
-                                Text("خروج", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-
                 // If NOT in Family Group: Join or Create
                 if (settings.familyGroupName.isEmpty()) {
                     item {
@@ -1494,7 +1486,11 @@ fun FamilyScreen(
                                         text = "👪 مجموعة: ${settings.familyGroupName}",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.secondary
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.clickable { 
+                                            newGroupName = settings.familyGroupName
+                                            showRenameDialog = true 
+                                        }
                                     )
                                     
                                     Box(
@@ -1545,14 +1541,14 @@ fun FamilyScreen(
                                     .padding(32.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("لا يوجد أعضاء آخرين في المجموعة العائلية، ابدأ بإضافة فرد يدويًا أو شارك الرمز.", color = Color.Gray, fontSize = 13.sp)
+                                Text("المجموعة حالياً مكونة منك فقط 👤، شارك الرمز أعلاه للأهل والأحبة للانضمام.", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
                             }
                         }
                     } else {
                         items(familyList) { member ->
                             FamilyMemberItemCard(
                                 member = member,
-                                onLikeClick = { viewModel.likeFamilyMember(member.id) },
+                                onLikeClick = { viewModel.likeFamilyMember(member.userId, member.name) },
                                 onDeleteClick = { viewModel.deleteFamilyMember(member.id) }
                             )
                         }
@@ -1627,32 +1623,41 @@ fun FamilyMemberItemCard(
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = member.relation,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray
-                        )
+                        if (member.lastWorship.isNotEmpty()) {
+                            Text(
+                                text = "آخر طاعة: ${member.lastWorship} ✅",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else {
+                            Text(
+                                text = "لم يسجل أي عبادة اليوم بعد",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
                     }
                 }
 
                 // Likes Hearts Trigger
                 IconButton(
                     onClick = onLikeClick,
-                    modifier = Modifier.testTag("like_member_${member.id}")
+                    modifier = Modifier.testTag("like_member_${member.userId}")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Icon(
                             imageVector = if (member.likedByMe) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "تفاعل",
                             tint = if (member.likedByMe) Color.Red else Color.Gray,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(22.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = member.likesCount.toString(),
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = if (member.likedByMe) Color.Red else Color.Gray
                         )
@@ -2211,7 +2216,8 @@ fun BadgeItem(
 fun SettingsScreen(
     settings: AppSettings,
     reminders: List<CustomReminder>,
-    viewModel: WorshipViewModel
+    viewModel: WorshipViewModel,
+    onPickAthanSound: () -> Unit
 ) {
     val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -2234,6 +2240,10 @@ fun SettingsScreen(
     var reminderHour by remember { mutableStateOf(19) }
     var reminderMinute by remember { mutableStateOf(0) }
     var reminderSound by remember { mutableStateOf("الافتراضي") }
+    var reminderRepeatType by remember { mutableStateOf("DAILY") }
+    var attachedWorship by remember { mutableStateOf<String?>(null) }
+
+    val worshipOptions = listOf("بدون ربط", "الفجر", "الظهر", "العصر", "المغرب", "العشاء", "أذكار الصباح", "أذكار المساء", "ورد القرآن")
 
     LazyColumn(
         modifier = Modifier
@@ -2496,11 +2506,15 @@ fun SettingsScreen(
                                     onToggle = { viewModel.toggleReminder(r) },
                                     onDelete = { viewModel.deleteReminder(r.id) },
                                     onEdit = {
-                                        reminderTitle = r.title
-                                        reminderHour = r.hour
-                                        reminderMinute = r.minute
-                                        reminderSound = r.soundUri
-                                        editingReminder = r
+                                        editingReminder?.let {
+                                            reminderTitle = it.title
+                                            reminderHour = it.hour
+                                            reminderMinute = it.minute
+                                            reminderSound = it.soundUri
+                                            reminderRepeatType = it.repeatType
+                                            attachedWorship = it.attachedWorship ?: "بدون ربط"
+                                        }
+                                        showAddReminderDialog = true
                                     }
                                 )
                             }
@@ -2552,6 +2566,29 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
                     )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onPickAthanSound,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (settings.customAdhanSoundUri == "default") "اختيار صوت أذان مخصص 🔊" else "تغيير صوت الأذان المخصص ✅",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (settings.customAdhanSoundUri != "default") {
+                        Text(
+                            text = "تم تفعيل صوت خارجي للأذان",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             }
         }
@@ -2770,7 +2807,9 @@ fun SettingsScreen(
                                         title = reminderTitle,
                                         hour = reminderHour,
                                         minute = reminderMinute,
-                                        soundUri = reminderSound
+                                        soundUri = reminderSound,
+                                        repeatType = reminderRepeatType,
+                                        attachedWorship = if (attachedWorship == "بدون ربط") null else attachedWorship
                                     ))
                                 }
                             } else {
@@ -2779,7 +2818,9 @@ fun SettingsScreen(
                                     hour = reminderHour,
                                     minute = reminderMinute,
                                     days = "يومي",
-                                    sound = reminderSound
+                                    sound = reminderSound,
+                                    repeatType = reminderRepeatType,
+                                    attachedWorship = if (attachedWorship == "بدون ربط") null else attachedWorship
                                 )
                             }
                             showAddReminderDialog = false
@@ -2851,7 +2892,58 @@ fun SettingsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("اختر صوت 🎵")
+                            Text("نغمة 🎵")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("نوع التكرار:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("ONCE" to "مرة", "DAILY" to "يومي", "WEEKLY" to "أسبوعي").forEach { (valType, label) ->
+                            val isSelected = reminderRepeatType == valType
+                            Button(
+                                onClick = { reminderRepeatType = valType },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(label, fontSize = 10.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("ربط بعبادة:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    var showWorshipMenu by remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                        OutlinedButton(
+                            onClick = { showWorshipMenu = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(attachedWorship ?: "بدون ربط", fontSize = 12.sp)
+                        }
+                        DropdownMenu(
+                            expanded = showWorshipMenu,
+                            onDismissRequest = { showWorshipMenu = false },
+                            modifier = Modifier.fillMaxWidth(0.6f)
+                        ) {
+                            worshipOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        attachedWorship = option
+                                        showWorshipMenu = false
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -2930,10 +3022,25 @@ fun ReminderItemRow(
                         modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
+                    val repeatLabel = when(reminder.repeatType) {
+                        "ONCE" -> "مرة واحدة"
+                        "DAILY" -> "يومياً"
+                        "WEEKLY" -> "أسبوعياً"
+                        else -> reminder.repeatDays
+                    }
                     Text(
-                        text = String.format(Locale.US, "%02d:%02d (%s)", reminder.hour, reminder.minute, reminder.repeatDays),
+                        text = String.format(Locale.US, "%02d:%02d (%s)", reminder.hour, reminder.minute, repeatLabel),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
+                    )
+                }
+                if (reminder.attachedWorship != null) {
+                    Text(
+                        text = "🔗 مرتبطة بـ: ${reminder.attachedWorship}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
