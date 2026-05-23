@@ -32,7 +32,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -40,6 +42,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -59,6 +62,34 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     // Current Date formatted as YYYY-MM-DD
     private val _currentDate = MutableStateFlow(getTodayDateString())
     val currentDate: StateFlow<String> = _currentDate.asStateFlow()
+
+    fun navigateToPreviousDay() {
+        viewModelScope.launch {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val current = sdf.parse(_currentDate.value) ?: return@launch
+            val calendar = Calendar.getInstance().apply { time = current }
+            calendar.add(Calendar.DAY_OF_YEAR, -1)
+            _currentDate.value = sdf.format(calendar.time)
+        }
+    }
+
+    fun navigateToNextDay() {
+        viewModelScope.launch {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val current = sdf.parse(_currentDate.value) ?: return@launch
+            val calendar = Calendar.getInstance().apply { time = current }
+            calendar.add(Calendar.DAY_OF_YEAR, 1)
+            
+            // Limit navigation to today's date if desired, or allow future planning?
+            // User asked for "historical", but usually one might want to plan.
+            // Let's allow but maybe add a constraint if it makes sense.
+            _currentDate.value = sdf.format(calendar.time)
+        }
+    }
+
+    fun navigateToToday() {
+        _currentDate.value = getTodayDateString()
+    }
 
     // Sound Unlocked (Audio Unlock Heuristic state)
     private val _isAudioUnlocked = MutableStateFlow(false)
@@ -167,6 +198,14 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             val existingSettings = repository.getSettingsImmediate()
             if (existingSettings == null) {
                 repository.saveSettings(AppSettings())
+            }
+
+            // Combine and listen to changes to automatically reschedule alarms
+            combine(prayerTimes, reminders) { _, _ ->
+                Unit
+            }.debounce(1500)
+             .collectLatest {
+                rescheduleAllAlarms()
             }
         }
     }
@@ -580,7 +619,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         name = "موقعك الفعلي (${String.format(Locale.US, "%.2f", lat)}, ${String.format(Locale.US, "%.2f", lon)})"
                     }
                     updateLocationSettings(true, lat, lon, name)
-                    _notificationFlow.emit("تم تحديد موقعك الفعلي بنجاح: $name! 🗺️")
+                    rescheduleAllAlarms(true)
                 } else {
                     _notificationFlow.emit("عذرًا، لم نتمكن من التقاط الموقع الفعلي بعد. تأكد من تفعيل الـ GPS. 📍")
                 }
@@ -791,6 +830,129 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             androidx.work.ExistingPeriodicWorkPolicy.KEEP,
             workRequest
         )
+    }
+
+    // Modern Alarm Scheduling Logic
+    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int) {
+        val application = getApplication<Application>()
+        val alarmManager = application.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
+        
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            if (before(Calendar.getInstance())) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
+        val intent = android.content.Intent(application, com.example.workers.WorshipReceiver::class.java).apply {
+            putExtra("TITLE", title)
+            putExtra("MESSAGE", message)
+            putExtra("ID", id)
+        }
+
+        val pendingIntent = android.app.PendingIntent.getBroadcast(
+            application,
+            id,
+            intent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        calendar.timeInMillis,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        calendar.timeInMillis,
+                        pendingIntent
+                    )
+                }
+            } else {
+                alarmManager.setExactAndAllowWhileIdle(
+                    android.app.AlarmManager.RTC_WAKEUP,
+                    calendar.timeInMillis,
+                    pendingIntent
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun rescheduleAllAlarms(showNotification: Boolean = false) {
+        withContext(kotlinx.coroutines.Dispatchers.Default) {
+            try {
+                val currentReminders = repository.getAllReminders().first()
+                val currentPrayerTimes = prayerTimes.value
+                
+                // 1. Schedule Prayer Times
+                val prayers = listOf(
+                    "الفجر" to currentPrayerTimes.fajr,
+                    "الظهر" to currentPrayerTimes.dhuhr,
+                    "العصر" to currentPrayerTimes.asr,
+                    "المغرب" to currentPrayerTimes.maghrib,
+                    "العشاء" to currentPrayerTimes.isha
+                )
+
+                prayers.forEachIndexed { index, (name, time) ->
+                    val parts = parseTime(time)
+                    if (parts != null) {
+                        scheduleExactAlarm(
+                            "حان وقت صلاة $name",
+                            "تقبل الله منك صالح الأعمال، حان الآن موعد أذان $name.",
+                            parts.first,
+                            parts.second,
+                            index + 1000 // Offset for prayer IDs
+                        )
+                    }
+                }
+
+                // 2. Schedule Custom Reminders
+                currentReminders.filter { it.isEnabled }.forEach { reminder ->
+                    scheduleExactAlarm(
+                        reminder.title,
+                        "تذكير: ${reminder.title}",
+                        reminder.hour,
+                        reminder.minute,
+                        reminder.id
+                    )
+                }
+                
+                if (showNotification) {
+                    _notificationFlow.emit("تم تحديث وجدولة جميع التنبيهات والآذان بنجاح! 🔔")
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Error in rescheduleAllAlarms: ${e.message}")
+            }
+        }
+    }
+
+    private fun parseTime(time: String): Pair<Int, Int>? {
+        if (time.isBlank() || !time.contains(":")) return null
+        return try {
+            // Support formats like "12:20 م" or "15:40"
+            val cleanTime = time.replace(" ص", "").replace(" م", "").trim()
+            val parts = cleanTime.split(":")
+            if (parts.size < 2) return null
+            
+            var hour = parts[0].toIntOrNull() ?: return null
+            val minute = parts[1].split(" ")[0].toIntOrNull() ?: return null // Handle cases like "12:20 AM"
+            
+            if (time.contains(" م") && hour < 12) hour += 12
+            if (time.contains(" ص") && hour == 12) hour = 0
+            
+            Pair(hour, minute)
+        } catch (e: Exception) {
+            Log.e("WorshipViewModel", "Error parsing time: $time")
+            null
+        }
     }
 }
 

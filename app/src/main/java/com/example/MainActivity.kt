@@ -49,6 +49,11 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import kotlinx.coroutines.launch
 import com.example.data.AppSettings
 import com.example.data.CustomReminder
 import com.example.data.FamilyMember
@@ -306,8 +311,28 @@ fun ZadHeader(
     onTabSelected: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val sdfDateStr = SimpleDateFormat("EEEE، d MMMM", Locale("ar"))
-    val todayDateStr = "اليوم، " + sdfDateStr.format(Date())
+    val currentDateStr by viewModel.currentDate.collectAsStateWithLifecycle()
+    
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.entries.all { it.value }
+        if (granted) {
+            viewModel.fetchAndSaveRealLocation(context)
+        } else {
+            Toast.makeText(context, "الرجاء تفعيل صلاحيات الموقع لتحديد مواقيت الصلاة بدقة", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    val sdfSource = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    val sdfDisplay = SimpleDateFormat("EEEE، d MMMM", Locale("ar"))
+    
+    val parsedDate = sdfSource.parse(currentDateStr) ?: Date()
+    val displayDate = if (currentDateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) {
+        "اليوم، " + sdfDisplay.format(parsedDate)
+    } else {
+        sdfDisplay.format(parsedDate)
+    }
 
     val isDark = settings.isDarkMode
 
@@ -318,7 +343,7 @@ fun ZadHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top
     ) {
-        // Left Column: 4 Circular Buttons + Welcome user
+        // Left Column: Action Buttons + Welcome user
         Column(
             horizontalAlignment = Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -327,13 +352,22 @@ fun ZadHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Button 1: Refresh Location
+                // Button 1: Refresh Location / Today
                 HeaderActionButton(
-                    icon = Icons.Default.Refresh,
-                    contentDescription = "تحديث الموقع",
+                    icon = if (currentDateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) Icons.Default.Refresh else Icons.Default.DateRange,
+                    contentDescription = "اليوم",
                     isDark = isDark,
                     onClick = {
-                        viewModel.fetchAndSaveRealLocation(context)
+                        if (currentDateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) {
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        } else {
+                            viewModel.navigateToToday()
+                        }
                     }
                 )
 
@@ -357,7 +391,7 @@ fun ZadHeader(
                     }
                 )
 
-                // Button 4: Sun/Moon Theme Toggle
+                // Button 4: Theme Toggle
                 HeaderActionButton(
                     emoji = if (isDark) "☀️" else "🌙",
                     contentDescription = if (isDark) "تفعيل الوضع المضيء" else "تفعيل الوضع المظلم",
@@ -382,7 +416,7 @@ fun ZadHeader(
             )
         }
 
-        // Right Column: Brand Name & Date
+        // Right Column: Brand Name & Date Navigation
         Column(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -398,23 +432,32 @@ fun ZadHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Navigate Back (Previous Day)
                 Icon(
-                    imageVector = Icons.Default.KeyboardArrowLeft,
-                    contentDescription = null,
-                    tint = if (isDark) Color.White.copy(alpha = 0.4f) else Color(0xFF047857).copy(alpha = 0.4f),
-                    modifier = Modifier.size(14.dp)
+                    imageVector = Icons.Default.KeyboardArrowRight, // RTL swap representation
+                    contentDescription = "اليوم السابق",
+                    tint = if (isDark) Color.White.copy(alpha = 0.6f) else Color(0xFF047857),
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clickable { viewModel.navigateToPreviousDay() }
                 )
+                
                 Text(
-                    text = todayDateStr,
+                    text = displayDate,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF064E3B).copy(alpha = 0.7f)
+                    color = if (isDark) Color.White.copy(alpha = 0.7f) else Color(0xFF064E3B).copy(alpha = 0.7f),
+                    modifier = Modifier.clickable { viewModel.navigateToToday() }
                 )
+
+                // Navigate Forward (Next Day)
                 Icon(
-                    imageVector = Icons.Default.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = if (isDark) Color.White.copy(alpha = 0.4f) else Color(0xFF047857).copy(alpha = 0.4f),
-                    modifier = Modifier.size(14.dp)
+                    imageVector = Icons.Default.KeyboardArrowLeft, // RTL swap representation
+                    contentDescription = "اليوم التالي",
+                    tint = if (isDark) Color.White.copy(alpha = 0.6f) else Color(0xFF047857),
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clickable { viewModel.navigateToNextDay() }
                 )
             }
 
@@ -1114,9 +1157,10 @@ fun FamilyScreen(
     familyList: List<FamilyMember>,
     viewModel: WorshipViewModel
 ) {
+    val context = LocalContext.current
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    var showGoogleAuthDialog by remember { mutableStateOf(false) }
     var showJoinDialog by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
     var newMemberName by remember { mutableStateOf("") }
     var newMemberRelation by remember { mutableStateOf("صديق(ة)") }
 
@@ -1174,7 +1218,42 @@ fun FamilyScreen(
                     
                     // Styled Google Sign-In Button
                     Button(
-                        onClick = { showGoogleAuthDialog = true },
+                        onClick = { 
+                            if (BuildConfig.GOOGLE_WEB_CLIENT_ID == "YOUR_GOOGLE_WEB_CLIENT_ID" || BuildConfig.GOOGLE_WEB_CLIENT_ID.isEmpty()) {
+                                Toast.makeText(context, "الرجاء الذهاب للوحة Secrets وإضافة GOOGLE_WEB_CLIENT_ID بالـ Web Client ID لتتمكن من التسجيل", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            val credentialManager = CredentialManager.create(context)
+                            val googleIdOption = GetGoogleIdOption.Builder()
+                                .setFilterByAuthorizedAccounts(false)
+                                .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                                .build()
+
+                            val request = GetCredentialRequest.Builder()
+                                .addCredentialOption(googleIdOption)
+                                .build()
+
+                            coroutineScope.launch {
+                                try {
+                                    val result = credentialManager.getCredential(
+                                        request = request,
+                                        context = context,
+                                    )
+                                    val credential = result.credential
+                                    if (credential is GoogleIdTokenCredential) {
+                                        viewModel.signInWithGoogle(
+                                            id = credential.id,
+                                            name = credential.displayName ?: "مستخدم زاد",
+                                            email = credential.id,
+                                            avatar = credential.profilePictureUri?.toString() ?: ""
+                                        )
+                                    }
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    Toast.makeText(context, "فشل تسجيل الدخول: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.onSurface
@@ -1473,113 +1552,6 @@ fun FamilyScreen(
                 }
 
                 item { Spacer(modifier = Modifier.height(30.dp)) }
-            }
-        }
-
-        // Beautiful Google Accounts simulation sheet / dialog
-        if (showGoogleAuthDialog) {
-            Dialog(onDismissRequest = { showGoogleAuthDialog = false }) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F1F)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                            Surface(
-                                modifier = Modifier.size(24.dp),
-                                shape = CircleShape,
-                                color = Color.White
-                            ) {
-                                Text("G", color = Color.Blue, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp, top=2.dp))
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "تسجيل الدخول باستخدام Google",
-                                color = Color.White,
-                                fontSize = 14.sp
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            "اختيار حساب",
-                            color = Color.White,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Normal
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "المتابعة إلى زاد",
-                            color = Color(0xFFA8C7FA),
-                            fontSize = 14.sp
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        HorizontalDivider(color = Color.DarkGray)
-                        
-                        val mockAccounts = listOf(
-                            Triple("Ahmed Eldokmery", "abeldokmery@gmail.com", "A"),
-                            Triple("أحمد الدقميري", "medoo51195@gmail.com", "م"),
-                            Triple("Ahmed Bahgat", "ahmed.bahgatz2data@gmail.com", "A")
-                        )
-                        
-                        mockAccounts.forEach { acc ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        viewModel.signInWithGoogle(
-                                            id = acc.second.hashCode().toString(),
-                                            name = acc.first,
-                                            email = acc.second,
-                                            avatar = "avatar"
-                                        )
-                                        showGoogleAuthDialog = false
-                                    }
-                                    .padding(vertical = 12.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF004D40)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(acc.third, color = Color.White)
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(acc.first, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                    Text(acc.second, color = Color.LightGray, fontSize = 12.sp)
-                                }
-                            }
-                            HorizontalDivider(color = Color.DarkGray)
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { /* No action mock */ }
-                                .padding(vertical = 16.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Person,
-                                contentDescription = null,
-                                tint = Color.LightGray,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text("استخدام حساب آخر", color = Color.White, fontSize = 14.sp)
-                        }
-                    }
-                }
             }
         }
 
@@ -3004,7 +2976,8 @@ fun AppWideWelcomeLoginScreen(
     settings: AppSettings,
     modifier: Modifier = Modifier
 ) {
-    var showGoogleAuthDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val isDark = settings.isDarkMode
 
     Column(
@@ -3105,7 +3078,44 @@ fun AppWideWelcomeLoginScreen(
 
         // Google Sign-In Button
         Button(
-            onClick = { showGoogleAuthDialog = true },
+            onClick = { 
+                if (BuildConfig.GOOGLE_WEB_CLIENT_ID == "YOUR_GOOGLE_WEB_CLIENT_ID" || BuildConfig.GOOGLE_WEB_CLIENT_ID.isEmpty()) {
+                    Toast.makeText(context, "الرجاء الذهاب للوحة Secrets وإضافة GOOGLE_WEB_CLIENT_ID بالـ Web Client ID لتتمكن من التسجيل", Toast.LENGTH_LONG).show()
+                    return@Button
+                }
+                val credentialManager = CredentialManager.create(context)
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .build()
+
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+
+                coroutineScope.launch {
+                    try {
+                        val result = credentialManager.getCredential(
+                            request = request,
+                            context = context,
+                        )
+                        val credential = result.credential
+                        if (credential is GoogleIdTokenCredential) {
+                            viewModel.signInWithGoogle(
+                                id = credential.id,
+                                name = credential.displayName ?: "مستخدم زاد",
+                                email = credential.id,
+                                avatar = credential.profilePictureUri?.toString() ?: ""
+                            )
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        Toast.makeText(context, "فشل تسجيل الدخول: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                        // Fallback to mock for testing in environment if needed? 
+                        // No, user asked for real.
+                    }
+                }
+            },
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -3139,113 +3149,6 @@ fun AppWideWelcomeLoginScreen(
             color = Color.Gray,
             textAlign = TextAlign.Center
         )
-    }
-
-    // Google Sign-In Interactive Simulation Dialog
-    if (showGoogleAuthDialog) {
-        Dialog(onDismissRequest = { showGoogleAuthDialog = false }) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1F1F1F)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                        Surface(
-                            modifier = Modifier.size(24.dp),
-                            shape = CircleShape,
-                            color = Color.White
-                        ) {
-                            Text("G", color = Color.Blue, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp, top=2.dp))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "تسجيل الدخول باستخدام Google",
-                            color = Color.White,
-                            fontSize = 14.sp
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        "اختيار حساب",
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "المتابعة إلى زاد",
-                        color = Color(0xFFA8C7FA),
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    HorizontalDivider(color = Color.DarkGray)
-                    
-                    val mockAccounts = listOf(
-                        Triple("Ahmed Eldokmery", "abeldokmery@gmail.com", "A"),
-                        Triple("أحمد الدقميري", "medoo51195@gmail.com", "م"),
-                        Triple("Ahmed Bahgat", "ahmed.bahgatz2data@gmail.com", "A")
-                    )
-                    
-                    mockAccounts.forEach { acc ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.signInWithGoogle(
-                                        id = acc.second.hashCode().toString(),
-                                        name = acc.first,
-                                        email = acc.second,
-                                        avatar = "avatar"
-                                    )
-                                    showGoogleAuthDialog = false
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF004D40)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(acc.third, color = Color.White)
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(acc.first, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                Text(acc.second, color = Color.LightGray, fontSize = 12.sp)
-                            }
-                        }
-                        HorizontalDivider(color = Color.DarkGray)
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { /* No action mock */ }
-                            .padding(vertical = 16.dp, horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color.LightGray,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text("استخدام حساب آخر", color = Color.White, fontSize = 14.sp)
-                    }
-                }
-            }
-        }
     }
 }
 
