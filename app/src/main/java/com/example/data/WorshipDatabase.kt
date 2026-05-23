@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "worship_progress", primaryKeys = ["date", "userId"])
@@ -176,7 +178,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {
@@ -186,6 +188,12 @@ abstract class WorshipDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: WorshipDatabase? = null
 
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE app_settings ADD COLUMN notificationVolume REAL NOT NULL DEFAULT 1.0")
+            }
+        }
+
         fun getDatabase(context: Context): WorshipDatabase {
             return INSTANCE ?: synchronized(this) {
                 val dbName = "zad_worship_final_v15_db"
@@ -193,7 +201,10 @@ abstract class WorshipDatabase : RoomDatabase() {
                     context.applicationContext,
                     WorshipDatabase::class.java,
                     dbName
-                ).fallbackToDestructiveMigration().build()
+                )
+                .addMigrations(MIGRATION_15_16)
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }
