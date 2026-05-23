@@ -196,18 +196,29 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     )
 
     init {
-        // Listen to progress changes and sync to cloud
+        // Seed basic settings locally first
+        seedInitialDataIfNeeded()
+
+        // Listen to progress changes and sync to cloud (with safety delay and checks)
         viewModelScope.launch {
             currentProgress.collectLatest { progress ->
-                syncProgressToCloud(progress)
+                try {
+                    syncProgressToCloud(progress)
+                } catch (e: Exception) {
+                    Log.e("WorshipViewModel", "Error syncing progress: ${e.message}")
+                }
             }
         }
 
         // Start listening to family group if already joined
         viewModelScope.launch {
-            val s = settings.first()
-            if (s.familyGroupInviteCode.isNotEmpty()) {
-                listenToFamilyUpdates(s.familyGroupInviteCode)
+            try {
+                val s = settings.first()
+                if (s.familyGroupInviteCode.isNotEmpty()) {
+                    listenToFamilyUpdates(s.familyGroupInviteCode)
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Error starting family listener: ${e.message}")
             }
         }
 
@@ -215,7 +226,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             combine(prayerTimes, reminders) { _, _ ->
                 Unit
-            }.debounce(1500)
+            }.debounce(2000)
              .collectLatest {
                 rescheduleAllAlarms()
             }
@@ -303,36 +314,42 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     private fun syncProgressToCloud(progress: WorshipProgress) {
         val set = settings.value
         if (set.isGoogleSignedIn && set.familyGroupInviteCode.isNotEmpty()) {
-            val userId = set.googleUserId
-            val groupCode = set.familyGroupInviteCode
-            val percentage = progress.calculatePercentage()
-            
-            val membersRef = firestore.collection("groups").document(groupCode).collection("members")
-            
-            // Find what was the last worship completed
-            val lastWorship = when {
-                progress.quranRead -> "ورد القرآن"
-                progress.adhkarEvening -> "أذكار المساء"
-                progress.adhkarMorning -> "أذكار الصباح"
-                progress.isha -> "صلاة العشاء"
-                progress.maghrib -> "صلاة المغرب"
-                progress.asr -> "صلاة العصر"
-                progress.dhuhr -> "صلاة الظهر"
-                progress.fajr -> "صلاة الفجر"
-                else -> ""
-            }
+            try {
+                val userId = set.googleUserId
+                val groupCode = set.familyGroupInviteCode
+                val percentage = progress.calculatePercentage()
+                
+                val membersRef = firestore.collection("groups").document(groupCode).collection("members")
+                
+                // Find what was the last worship completed
+                val lastWorship = when {
+                    progress.quranRead -> "ورد القرآن"
+                    progress.adhkarEvening -> "أذكار المساء"
+                    progress.adhkarMorning -> "أذكار الصباح"
+                    progress.isha -> "صلاة العشاء"
+                    progress.maghrib -> "صلاة المغرب"
+                    progress.asr -> "صلاة العصر"
+                    progress.dhuhr -> "صلاة الظهر"
+                    progress.fajr -> "صلاة الفجر"
+                    else -> ""
+                }
 
-            membersRef.document(userId).set(
-                mapOf(
-                    "userId" to userId,
-                    "name" to set.googleUserName,
-                    "avatarUrl" to set.googleUserAvatarUrl,
-                    "progress" to percentage,
-                    "lastWorship" to lastWorship,
-                    "lastUpdated" to System.currentTimeMillis()
-                ),
-                com.google.firebase.firestore.SetOptions.merge()
-            )
+                membersRef.document(userId).set(
+                    mapOf(
+                        "userId" to userId,
+                        "name" to set.googleUserName,
+                        "avatarUrl" to set.googleUserAvatarUrl,
+                        "progress" to percentage,
+                        "lastWorship" to lastWorship,
+                        "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    ),
+                    com.google.firebase.firestore.SetOptions.merge()
+                ).addOnFailureListener { e ->
+                    Log.e("WorshipViewModel", "Firestore sync failure: ${e.message}")
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Exception in syncProgressToCloud: ${e.message}")
+            }
         }
     }
 
