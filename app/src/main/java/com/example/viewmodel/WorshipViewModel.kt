@@ -779,8 +779,21 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Google Sign-In Integration Methods
-    fun signInWithGoogle(id: String, name: String, email: String, avatar: String) {
+    fun signInWithGoogle(id: String, name: String, email: String, avatar: String, idToken: String = "") {
         viewModelScope.launch {
+            if (idToken.isNotEmpty()) {
+                try {
+                    val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
+                    auth.signInWithCredential(credential).addOnCompleteListener { task ->
+                        if (!task.isSuccessful) {
+                            android.util.Log.e("WorshipViewModel", "Firebase auth failed: ${task.exception?.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            
             val currentSet = settings.value
             val updated = currentSet.copy(
                 isGoogleSignedIn = true,
@@ -938,19 +951,22 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                                 }
                             } else {
                                 viewModelScope.launch {
-                                    _notificationFlow.emit("حدث خطأ أثناء إنشاء المجموعة. تأكد من اتصالك بالإنترنت ⚠️")
+                                    val err = task.exception?.message ?: "تأكد من اتصالك بالإنترنت"
+                                    _notificationFlow.emit("حدث خطأ أثناء إنشاء المجموعة: $err ⚠️")
                                 }
                             }
                         }
                     } else {
                         viewModelScope.launch {
-                            _notificationFlow.emit("حدث خطأ أثناء الاتصال بالإنترنت ⚠️")
+                            val err = getTask.exception?.message ?: "تأكد من اتصالك بالإنترنت"
+                            _notificationFlow.emit("حدث خطأ: $err ⚠️")
                         }
                     }
                 }
             } catch (e: Exception) {
                 viewModelScope.launch {
-                    _notificationFlow.emit("حدث خطأ أثناء إنشاء المجموعة ⚠️")
+                    val err = e.message ?: "تأكد من اتصالك بالإنترنت"
+                    _notificationFlow.emit("حدث خطأ: $err ⚠️")
                 }
             }
         }
@@ -1044,7 +1060,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
             } catch (e: Exception) {
-                _notificationFlow.emit("حدث خطأ أثناء الاتصال. تأكد من اتصالك بالإنترنت ⚠️")
+                _notificationFlow.emit("حدث خطأ: ${e.message} ⚠️")
             }
         }
     }

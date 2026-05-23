@@ -1384,7 +1384,8 @@ fun FamilyScreen(
                                         id = googleIdCredential.id,
                                         name = googleIdCredential.displayName ?: "مستخدم زاد",
                                         email = googleIdCredential.id,
-                                        avatar = googleIdCredential.profilePictureUri?.toString() ?: ""
+                                        avatar = googleIdCredential.profilePictureUri?.toString() ?: "",
+                                        idToken = googleIdCredential.idToken
                                     )
                                 } catch (e: Exception) {
                                     e.printStackTrace()
@@ -3636,7 +3637,8 @@ fun AppWideWelcomeLoginScreen(
                                 id = credential.id,
                                 name = credential.displayName ?: "مستخدم زاد",
                                 email = credential.id,
-                                avatar = credential.profilePictureUri?.toString() ?: ""
+                                avatar = credential.profilePictureUri?.toString() ?: "",
+                                idToken = credential.idToken
                             )
                         }
                     } catch (e: Exception) {
