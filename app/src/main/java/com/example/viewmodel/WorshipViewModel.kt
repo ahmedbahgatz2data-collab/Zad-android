@@ -566,12 +566,16 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun joinFamilyGroup(inviteCode: String) {
         viewModelScope.launch {
             val trimmedCode = inviteCode.trim().uppercase()
-            if (trimmedCode.startsWith("ZAD-") && trimmedCode.length == 8) {
+            // Support codes like ZAD-580 or ZAD-5800 (length 7 or 8)
+            if (trimmedCode.startsWith("ZAD-") && (trimmedCode.length == 7 || trimmedCode.length == 8)) {
                 val currentSet = settings.value
-                val groupName = when ((trimmedCode.takeLast(4).toIntOrNull() ?: 1) % 3) {
+                // If it contains 580 or 5800, name it "Home" as requested
+                val groupName = if (trimmedCode.contains("580")) "Home" else when ((trimmedCode.takeLast(3).toIntOrNull() ?: 1) % 5) {
                     0 -> "عائلة الهاشمي"
                     1 -> "عائلة المنصوري"
-                    else -> "دائرة الأهل الروحية"
+                    2 -> "دائرة الأهل الروحية"
+                    3 -> "أهل الجنة"
+                    else -> "عائلة الخير"
                 }
                 val updated = currentSet.copy(
                     familyGroupName = groupName,
@@ -854,7 +858,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Modern Alarm Scheduling Logic
-    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int) {
+    private fun scheduleExactAlarm(title: String, message: String, hour: Int, minute: Int, id: Int, sound: String = "default") {
         val application = getApplication<Application>()
         val alarmManager = application.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
         
@@ -871,6 +875,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             putExtra("TITLE", title)
             putExtra("MESSAGE", message)
             putExtra("ID", id)
+            putExtra("SOUND", sound)
         }
 
         val pendingIntent = android.app.PendingIntent.getBroadcast(
@@ -942,7 +947,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         "تذكير: ${reminder.title}",
                         reminder.hour,
                         reminder.minute,
-                        reminder.id
+                        reminder.id,
+                        reminder.soundUri
                     )
                 }
                 

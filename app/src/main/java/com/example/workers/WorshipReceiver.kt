@@ -16,24 +16,39 @@ class WorshipReceiver : BroadcastReceiver() {
         val message = intent.getStringExtra("MESSAGE") ?: "حان وقت العبادة، تقبل الله منك!"
         val soundUri = intent.getStringExtra("SOUND") ?: "default"
 
-        showNotification(context, title, message)
+        showNotification(context, title, message, soundUri)
     }
 
-    private fun showNotification(context: Context, title: String, message: String) {
-        val channelId = "worship_reminders_high"
+    private fun showNotification(context: Context, title: String, message: String, soundUriStr: String) {
+        val soundUri = if (soundUriStr == "default" || soundUriStr.isBlank()) {
+            android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+        } else {
+            android.net.Uri.parse(soundUriStr)
+        }
+
+        // Generate a unique channel ID based on the sound to ensure custom sounds work on Android 8.0+
+        val channelId = "worship_channel_${soundUri.hashCode()}"
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "تذكيرات العبادة العاجلة",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "قناة لتنبيهات الصلاة والعبادات الهامة"
-                enableLights(true)
-                enableVibration(true)
-            }
             val manager = context.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            if (manager.getNotificationChannel(channelId) == null) {
+                val attributes = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                
+                val channel = NotificationChannel(
+                    channelId,
+                    "تنبيه: $title",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "تنبيات مخصصة بفضل الله"
+                    enableLights(true)
+                    enableVibration(true)
+                    setSound(soundUri, attributes)
+                }
+                manager.createNotificationChannel(channel)
+            }
         }
 
         // Create notification builder
@@ -45,11 +60,9 @@ class WorshipReceiver : BroadcastReceiver() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
-            .setFullScreenIntent(null, true) // For on-screen alerts if needed, but risky without activity
+            .setSound(soundUri)
 
         val manager = NotificationManagerCompat.from(context)
-        // Note: Missing permission check might cause issue on SDK 33+, 
-        // but typically the app should request it.
         try {
             manager.notify(System.currentTimeMillis().toInt(), builder.build())
         } catch (e: SecurityException) {

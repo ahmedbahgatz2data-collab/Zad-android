@@ -71,6 +71,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Request Notification Permission for Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val launcher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+                if (!isGranted) {
+                    Toast.makeText(this, "التنبيهات مهمة لتذكيرك بمواقيت الصلاة، يرجى تفعيلها من الإعدادات.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
         setContent {
             val settingsState by viewModel.settings.collectAsStateWithLifecycle()
             MyApplicationTheme(darkTheme = settingsState.isDarkMode) {
@@ -352,21 +365,21 @@ fun ZadHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Button 1: Refresh Location / Today
+                // Button 1: Sign Out (Formerly Refresh/Today)
+                val coroutineScope = rememberCoroutineScope()
                 HeaderActionButton(
-                    icon = if (currentDateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) Icons.Default.Refresh else Icons.Default.DateRange,
-                    contentDescription = "اليوم",
+                    icon = Icons.Default.Logout,
+                    contentDescription = "تسجيل الخروج",
                     isDark = isDark,
                     onClick = {
-                        if (currentDateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) {
-                            locationPermissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                                )
-                            )
-                        } else {
-                            viewModel.navigateToToday()
+                        coroutineScope.launch {
+                            try {
+                                val credentialManager = androidx.credentials.CredentialManager.create(context)
+                                credentialManager.clearCredentialState(androidx.credentials.ClearCredentialStateRequest())
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                            viewModel.signOutGoogle()
                         }
                     }
                 )
@@ -545,13 +558,6 @@ fun TodayScreen(
         // worship ledger percentage and message
         item {
             WorshipLedgerCard(percentage = percentage, progress = progress)
-        }
-
-        // AutoPlay Constraints Audio Banner
-        if (!isAudioUnlocked) {
-            item {
-                AudioUnlockWidget(onUnlock = { viewModel.unlockAudioAndPlayPreview() })
-            }
         }
 
         // Today Prayer Radar Group
@@ -2810,12 +2816,43 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     
                     var showTimePicker by remember { mutableStateOf(false) }
+                    val ringtoneLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.StartActivityForResult()
+                    ) { result ->
+                        if (result.resultCode == android.app.Activity.RESULT_OK) {
+                            val uri = result.data?.getParcelableExtra<android.net.Uri>(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+                            if (uri != null) {
+                                reminderSound = uri.toString()
+                                Toast.makeText(context, "تم اختيار النغمة بنجاح!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                     
-                    Button(
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("اختر الوقت: ${reminderHour.toString().padStart(2, '0')}:${reminderMinute.toString().padStart(2, '0')}")
+                        Button(
+                            onClick = { showTimePicker = true },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("الوقت: ${reminderHour.toString().padStart(2, '0')}:${reminderMinute.toString().padStart(2, '0')}")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                val intent = android.content.Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION)
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TITLE, "اختر صوت التنبيه")
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, android.net.Uri.parse(reminderSound))
+                                }
+                                ringtoneLauncher.launch(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("اختر صوت 🎵")
+                        }
                     }
 
                     if (showTimePicker) {
@@ -2843,19 +2880,13 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))                
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("صوت التنبيه:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf("الافتراضي", "هادئ", "تنبيه قوي").forEach { soundOpt ->
-                            FilterChip(
-                                selected = reminderSound == soundOpt,
-                                onClick = { reminderSound = soundOpt },
-                                label = { Text(soundOpt, fontSize = 11.sp) }
-                            )
-                        }
-                    }
+                    Text("صوت التنبيه النشط:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Text(
+                        text = if (reminderSound.startsWith("content://")) "نغمة مخصصة من الجهاز ✅" else reminderSound,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         )
