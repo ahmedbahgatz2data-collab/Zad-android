@@ -636,31 +636,7 @@ fun TodayScreen(
             PrayerTimesGrid(prayerTimes = prayerTimes, settings = settings)
         }
 
-        // 2x1 Grid for Location and Adhan Settings
-        item {
-            val context = androidx.compose.ui.platform.LocalContext.current
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                QuickActionCard(
-                    title = "إعدادات الأذان",
-                    subtitle = "تعديل المواعيد والتنبيهات",
-                    icon = Icons.Default.VolumeUp,
-                    modifier = Modifier.weight(1f),
-                    isDark = isDark,
-                    onClick = { viewModel.unlockAudioAndPlayPreview() }
-                )
-                QuickActionCard(
-                    title = "تحديث الموقع",
-                    subtitle = "لضمان دقة مواقيت الصلاة",
-                    icon = Icons.Default.MyLocation,
-                    modifier = Modifier.weight(1f),
-                    isDark = isDark,
-                    onClick = { viewModel.fetchAndSaveRealLocation(context) }
-                )
-            }
-        }
+
 
         // Expanded Progress card
         item {
@@ -1870,6 +1846,7 @@ fun StatsScreen(
     viewModel: WorshipViewModel
 ) {
     val settingsState by viewModel.settings.collectAsStateWithLifecycle()
+    val currentProgress by viewModel.currentProgress.collectAsStateWithLifecycle()
     val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = LocalContext.current
@@ -2167,27 +2144,51 @@ fun StatsScreen(
         }
 
         item {
+            val isFajrUnlocked = currentProgress.fajr || streak >= 1
             BadgeItem(
                 title = "حارس الفجر الأول",
-                desc = "الالتزام بصلاة الفجر في وقتها لـ 5 أيام متتالية",
+                desc = "أداء صلاة الفجر في وقتها اليوم أو الالتزام بورد الصلاة",
                 emoji = "🎖️",
-                isUnlocked = true
+                isUnlocked = isFajrUnlocked
             )
         }
         item {
+            val isAdhkarUnlocked = currentProgress.adhkarMorning && currentProgress.adhkarEvening
             BadgeItem(
                 title = "الذاكر الشاكر",
-                desc = "إتمام أوراد الأذكار اليومية الصباحية والمسائية دون انقطاع",
+                desc = "إكمال أوراد الأذكار الصباحية والمسائية المسجلة بالكامل لليوم",
                 emoji = "⭐",
-                isUnlocked = true
+                isUnlocked = isAdhkarUnlocked
             )
         }
         item {
+            val isQuranUnlocked = quarters >= 1 || currentProgress.quranRead
             BadgeItem(
-                title = "صديق القرآن",
-                desc = "قراءة ورد قرآني مستمر لأسبوع متتالٍ",
+                title = "صديق القرآن ربع حزب",
+                desc = "قراءة الورد القرآني اليومي أو إنجاز أرباع من سورة البقرة/القرآن الكريم",
                 emoji = "🕌",
-                isUnlocked = (quarters >= 12)
+                isUnlocked = isQuranUnlocked
+            )
+        }
+        item {
+            val isSunnahUnlocked = currentProgress.sunnahFajr || currentProgress.sunnahDuha || 
+                    currentProgress.sunnahDhuhrQabli || currentProgress.sunnahDhuhrBadi || 
+                    currentProgress.sunnahMaghrib || currentProgress.sunnahIsha || currentProgress.sunnahQiyam
+            BadgeItem(
+                title = "حارس السنن والنوافل",
+                desc = "المحافظة على صلاة ركعة واحدة على الأقل من السنن والرواتب والقيام لليوم",
+                emoji = "💎",
+                isUnlocked = isSunnahUnlocked
+            )
+        }
+        item {
+            val isFivePrayersUnlocked = currentProgress.fajr && currentProgress.dhuhr && 
+                    currentProgress.asr && currentProgress.maghrib && currentProgress.isha
+            BadgeItem(
+                title = "بطل الصلوات الخمس",
+                desc = "إتمام جميع الصلوات المفروضة الخمس بالكامل خلال يوم واحد",
+                emoji = "👑",
+                isUnlocked = isFivePrayersUnlocked
             )
         }
 

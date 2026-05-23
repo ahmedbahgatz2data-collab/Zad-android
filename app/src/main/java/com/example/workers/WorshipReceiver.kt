@@ -12,22 +12,40 @@ import com.example.R
 
 class WorshipReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // Acquire PARTIAL_WAKE_LOCK & SCREEN_BRIGHT_WAKE_LOCK to ensure screen wakes up under lock screen
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        val wakeLock = powerManager?.newWakeLock(
+            android.os.PowerManager.PARTIAL_WAKE_LOCK,
+            "Zad:WorshipWakeLock"
+        )
+        @Suppress("DEPRECATION")
+        val screenWakeLock = powerManager?.newWakeLock(
+            android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or android.os.PowerManager.ON_AFTER_RELEASE,
+            "Zad:WorshipScreenWakeLock"
+        )
+        try {
+            wakeLock?.acquire(15000) // Keep CPU awake for 15 seconds
+            screenWakeLock?.acquire(10000) // Turn screen on for 10 seconds
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         val title = intent.getStringExtra("TITLE") ?: "تنبيه العبادات"
         val message = intent.getStringExtra("MESSAGE") ?: "حان وقت العبادة، تقبل الله منك!"
         val soundUri = intent.getStringExtra("SOUND") ?: "default"
         val attachedWorship = intent.getStringExtra("ATTACHED_WORSHIP")
+        val notificationId = intent.getIntExtra("ID", System.currentTimeMillis().toInt() and 0xfffffff)
 
-        showNotification(context, title, message, soundUri, attachedWorship)
+        showNotification(context, title, message, soundUri, attachedWorship, notificationId)
     }
 
-    private fun showNotification(context: Context, title: String, message: String, soundUriStr: String, attachedWorship: String?) {
+    private fun showNotification(context: Context, title: String, message: String, soundUriStr: String, attachedWorship: String?, notificationId: Int) {
         val soundUri = if (soundUriStr == "default" || soundUriStr.isBlank()) {
             android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
         } else {
             android.net.Uri.parse(soundUriStr)
         }
 
-        val notificationId = System.currentTimeMillis().toInt()
         val channelId = "worship_channel_${soundUri.hashCode()}"
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -61,12 +79,24 @@ class WorshipReceiver : BroadcastReceiver() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(false)
-            .setOngoing(true)
+            .setAutoCancel(true)
+            .setOngoing(false)
             .setSound(soundUri)
             .setLocalOnly(true)
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
+
+        // Set Full Screen Intent to wake up and display notification on lock screen
+        val fullScreenIntent = Intent(context, com.example.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val fullScreenPendingIntent = android.app.PendingIntent.getActivity(
+            context,
+            notificationId + 2,
+            fullScreenIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        builder.setFullScreenIntent(fullScreenPendingIntent, true)
 
         if (attachedWorship != null) {
             val actionIntent = Intent(context, WorshipActionReceiver::class.java).apply {
@@ -83,7 +113,7 @@ class WorshipReceiver : BroadcastReceiver() {
         }
 
         val notification = builder.build()
-        notification.flags = notification.flags or android.app.Notification.FLAG_INSISTENT
+        // Removed FLAG_INSISTENT so that the user handles it as clearable and swipable 
         
         val manager = NotificationManagerCompat.from(context)
         try {

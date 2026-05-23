@@ -15,7 +15,7 @@ class ExampleUnitTest {
   fun testPrayerTimes() {
     val cal = Calendar.getInstance()
     cal.set(2026, Calendar.MAY, 22)
-    val times = PrayerTimesCalculator.calculate(21.4225, 39.8262, cal)
+    val times = PrayerTimesCalculator.calculate(21.4225, 39.8262, calendar = cal)
     println("--- MECCA PRAYER TIMES ---")
     println("Fajr: ${times.fajr}")
     println("Shurouq: ${times.shurouq}")

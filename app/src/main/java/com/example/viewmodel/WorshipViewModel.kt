@@ -674,16 +674,30 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private var isTestingNotificationActive = false
+
     fun testNotification() {
         val application = getApplication<Application>()
-        val intent = android.content.Intent(application, com.example.workers.WorshipReceiver::class.java).apply {
-            putExtra("TITLE", "اختبار التنبيه 🔔")
-            putExtra("MESSAGE", "هذا تنبيه تجريبي للتأكد من عمل النظام بشكل صحيح.")
-            putExtra("ID", 9999)
-        }
-        application.sendBroadcast(intent)
-        viewModelScope.launch {
-            _notificationFlow.emit("تم إرسال تنبيه تجريبي! 📢")
+        if (isTestingNotificationActive) {
+            val manager = androidx.core.app.NotificationManagerCompat.from(application)
+            try {
+                manager.cancel(9999)
+            } catch (e: Exception) {}
+            isTestingNotificationActive = false
+            viewModelScope.launch {
+                _notificationFlow.emit("تم إيقاف التنبيه التجريبي. 🔕")
+            }
+        } else {
+            isTestingNotificationActive = true
+            val intent = android.content.Intent(application, com.example.workers.WorshipReceiver::class.java).apply {
+                putExtra("TITLE", "اختبار التنبيه 🔔")
+                putExtra("MESSAGE", "هذا تنبيه تجريبي للتأكد من عمل النظام بشكل صحيح.")
+                putExtra("ID", 9999)
+            }
+            application.sendBroadcast(intent)
+            viewModelScope.launch {
+                _notificationFlow.emit("تم إرسال تنبيه تجريبي! 📢")
+            }
         }
     }
 
@@ -730,6 +744,33 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             repository.saveSettings(updated)
             _notificationFlow.emit("مرحبًا بك يا $name! تم تسجيل الدخول بنجاح عبر Google. 🟢")
             
+            // Try fetching their active group from the cloud to restore it!
+            try {
+                firestore.collection("users").document(id).get().addOnCompleteListener { docTask ->
+                    if (docTask.isSuccessful && docTask.result != null) {
+                        val doc = docTask.result
+                        if (doc != null && doc.exists()) {
+                            val groupCode = doc.getString("activeGroupCode") ?: ""
+                            val groupName = doc.getString("activeGroupName") ?: ""
+                            if (groupCode.isNotEmpty()) {
+                                viewModelScope.launch {
+                                    val updatedWithGroup = updated.copy(
+                                        familyGroupName = groupName,
+                                        familyGroupInviteCode = groupCode
+                                    )
+                                    repository.saveSettings(updatedWithGroup)
+                                    syncProgressToCloud(currentProgress.value)
+                                    listenToFamilyUpdates(groupCode)
+                                    _notificationFlow.emit("تمت استعادة مجموعتك العائلية بنجاح: $groupName 👥")
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Error restoring group upon login: ${e.message}")
+            }
+
             // If already in a group, sync immediately
             if (updated.familyGroupInviteCode.isNotEmpty()) {
                 syncProgressToCloud(currentProgress.value)
@@ -812,9 +853,19 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 ).addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         try {
-                            firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(me)
-                            syncProgressToCloudExplicit(currentProgress.value, randomCode)
-                            listenToFamilyUpdates(randomCode)
+                             firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(me)
+                             try {
+                                 firestore.collection("users").document(me.userId).set(
+                                     mapOf(
+                                         "activeGroupCode" to randomCode,
+                                         "activeGroupName" to groupName
+                                     )
+                                 )
+                             } catch (ex: Exception) {
+                                 ex.printStackTrace()
+                             }
+                             syncProgressToCloudExplicit(currentProgress.value, randomCode)
+                             listenToFamilyUpdates(randomCode)
                         } catch (e: Exception) {
                             Log.e("WorshipViewModel", "Error updating Firestore member details: ${e.message}")
                         }
@@ -882,6 +933,16 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                                 
                                 try {
                                     firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(me)
+                                    try {
+                                        firestore.collection("users").document(me.userId).set(
+                                            mapOf(
+                                                "activeGroupCode" to trimmedCode,
+                                                "activeGroupName" to groupName
+                                            )
+                                        )
+                                    } catch (ex: Exception) {
+                                        ex.printStackTrace()
+                                    }
                                     syncProgressToCloudExplicit(currentProgress.value, trimmedCode)
                                     listenToFamilyUpdates(trimmedCode)
                                 } catch (e: Exception) {
@@ -924,6 +985,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             )
             repository.saveSettings(updated)
             repository.insertFamilyMembers(emptyList()) // clear current family circle members
+            try {
+                if (currentSet.isGoogleSignedIn && currentSet.googleUserId.isNotEmpty() && currentSet.googleUserId != "default") {
+                    firestore.collection("users").document(currentSet.googleUserId).delete()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
             _notificationFlow.emit("تم مغادرة المجموعة العائلية. 👥")
         }
     }
@@ -1045,6 +1113,22 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     // Play Adhan Sound Preview (Audio Unlock Heuristic operation)
     fun unlockAudioAndPlayPreview() {
         _isAudioUnlocked.update { true }
+        if (activeMediaPlayer != null) {
+            try {
+                if (activeMediaPlayer?.isPlaying == true) {
+                    activeMediaPlayer?.stop()
+                }
+            } catch (e: Exception) {}
+            try {
+                activeMediaPlayer?.release()
+            } catch (e: Exception) {}
+            activeMediaPlayer = null
+            viewModelScope.launch {
+                _notificationFlow.emit("تم إيقاف تجربة صوت الأذان 🔇")
+            }
+            return
+        }
+
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val set = settings.value
