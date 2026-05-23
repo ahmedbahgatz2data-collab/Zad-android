@@ -781,19 +781,6 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     // Google Sign-In Integration Methods
     fun signInWithGoogle(id: String, name: String, email: String, avatar: String, idToken: String = "") {
         viewModelScope.launch {
-            if (idToken.isNotEmpty()) {
-                try {
-                    val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
-                    auth.signInWithCredential(credential).addOnCompleteListener { task ->
-                        if (!task.isSuccessful) {
-                            android.util.Log.e("WorshipViewModel", "Firebase auth failed: ${task.exception?.message}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            
             val currentSet = settings.value
             val updated = currentSet.copy(
                 isGoogleSignedIn = true,
@@ -804,44 +791,65 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             )
             repository.saveSettings(updated)
             _notificationFlow.emit("مرحبًا بك يا $name! تم تسجيل الدخول بنجاح عبر Google. 🟢")
-            
-            // Try fetching their active group from the cloud to restore it!
-            try {
-                firestore.collection("users").document(id).get().addOnCompleteListener { docTask ->
-                    if (docTask.isSuccessful && docTask.result != null) {
-                        val doc = docTask.result
-                        if (doc != null && doc.exists()) {
-                            val groupCode = doc.getString("activeGroupCode") ?: ""
-                            val groupName = doc.getString("activeGroupName") ?: ""
-                            if (groupCode.isNotEmpty()) {
-                                viewModelScope.launch {
-                                    val updatedWithGroup = updated.copy(
-                                        familyGroupName = groupName,
-                                        familyGroupInviteCode = groupCode
-                                    )
-                                    repository.saveSettings(updatedWithGroup)
-                                    syncProgressToCloud(currentProgress.value)
-                                    listenToFamilyUpdates(groupCode)
-                                    _notificationFlow.emit("تمت استعادة مجموعتك العائلية بنجاح: $groupName 👥")
+
+            val restoreGroupLogic = {
+                // Try fetching their active group from the cloud to restore it!
+                try {
+                    firestore.collection("users").document(id).get().addOnCompleteListener { docTask ->
+                        if (docTask.isSuccessful && docTask.result != null) {
+                            val doc = docTask.result
+                            if (doc != null && doc.exists()) {
+                                val groupCode = doc.getString("activeGroupCode") ?: ""
+                                val groupName = doc.getString("activeGroupName") ?: ""
+                                if (groupCode.isNotEmpty()) {
+                                    viewModelScope.launch {
+                                        val currentGroup = settings.value
+                                        val updatedWithGroup = currentGroup.copy(
+                                            familyGroupName = groupName,
+                                            familyGroupInviteCode = groupCode
+                                        )
+                                        repository.saveSettings(updatedWithGroup)
+                                        syncProgressToCloud(currentProgress.value)
+                                        listenToFamilyUpdates(groupCode)
+                                        _notificationFlow.emit("تمت استعادة مجموعتك العائلية بنجاح: $groupName 👥")
+                                    }
                                 }
                             }
                         }
                     }
+                } catch (e: Exception) {
+                    Log.e("WorshipViewModel", "Error restoring group upon login: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Error restoring group upon login: ${e.message}")
             }
 
-            // If already in a group, sync immediately
-            if (updated.familyGroupInviteCode.isNotEmpty()) {
-                syncProgressToCloud(currentProgress.value)
-                listenToFamilyUpdates(updated.familyGroupInviteCode)
+            if (idToken.isNotEmpty()) {
+                try {
+                    val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
+                    auth.signInWithCredential(credential).addOnCompleteListener { task ->
+                        if (!task.isSuccessful) {
+                            android.util.Log.e("WorshipViewModel", "Firebase auth failed: ${task.exception?.message}")
+                        }
+                        // Now safely restore after Auth completes
+                        restoreGroupLogic()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    restoreGroupLogic()
+                }
+            } else {
+                restoreGroupLogic()
             }
         }
     }
 
     fun signOutGoogle() {
         viewModelScope.launch {
+            try {
+                auth.signOut()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            familyListener?.remove()
             val currentSet = settings.value
             val updated = currentSet.copy(
                 isGoogleSignedIn = false,
@@ -853,7 +861,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 familyGroupInviteCode = ""
             )
             repository.saveSettings(updated)
-            repository.clearFamilyMembers() // Clean list when signing out
+            repository.clearFamilyMembers()
             _notificationFlow.emit("تم تسجيل الخروج من حساب Google بنجاح. 👋")
         }
     }
@@ -959,7 +967,10 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             }
 
             val trimmedCode = inviteCode.trim().uppercase()
-            if (trimmedCode.isEmpty()) return@launch
+            if (trimmedCode.isEmpty() || trimmedCode.length < 5) {
+               _notificationFlow.emit("رمز الدعوة غير صحيح ⚠️")
+               return@launch
+            }
 
             _notificationFlow.emit("جاري الانضمام لمجموعة عبر الرمز... ⏳")
             repository.clearFamilyMembers()
@@ -973,22 +984,21 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 lastWorship = "الآن"
             )
 
-            // Local fallback logic first: update settings locally
-            val localGroupName = "مجموعة زاد العائلية"
-            
-            // Try contacting cloud Firestore
+            // Try contacting cloud Firestore synchronously
             try {
                 firestore.collection("groups").document(trimmedCode).get()
                     .addOnCompleteListener { task ->
                         viewModelScope.launch {
                             if (task.isSuccessful && task.result != null && task.result!!.exists()) {
                                 val doc = task.result!!
-                                val groupName = doc.getString("name") ?: localGroupName
-                                val updated = updatedBase.copy(
-                                    familyGroupName = groupName,
+                                val actualGroupName = doc.getString("name") ?: "مجموعة زاد العائلية"
+                                
+                                val finalUpdated = updatedBase.copy(
+                                    familyGroupName = actualGroupName,
                                     familyGroupInviteCode = trimmedCode
                                 )
-                                repository.saveSettings(updated)
+                                repository.saveSettings(finalUpdated)
+                                repository.insertFamilyMembers(listOf(me))
                                 
                                 try {
                                     val meMap = mapOf(
@@ -1001,23 +1011,19 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                                          "lastWorship" to me.lastWorship
                                     )
                                     firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(meMap)
-                                    try {
-                                        firestore.collection("users").document(me.userId).set(
-                                            mapOf(
-                                                "activeGroupCode" to trimmedCode,
-                                                "activeGroupName" to groupName
-                                            )
+                                    firestore.collection("users").document(me.userId).set(
+                                        mapOf(
+                                            "activeGroupCode" to trimmedCode,
+                                            "activeGroupName" to actualGroupName
                                         )
-                                    } catch (ex: Exception) {
-                                        ex.printStackTrace()
-                                    }
+                                    )
                                     syncProgressToCloudExplicit(currentProgress.value, trimmedCode)
                                     listenToFamilyUpdates(trimmedCode)
                                 } catch (e: Exception) {
-                                    Log.e("WorshipViewModel", "Error joining Firebase collection: ${e.message}")
+                                    Log.e("WorshipViewModel", "Error syncing locally joined group: ${e.message}")
                                 }
                                 
-                                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
+                                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $actualGroupName! 🟢")
                             } else {
                                 val msg = task.exception?.message ?: ""
                                 if (msg.contains("offline", ignoreCase = true)) {
