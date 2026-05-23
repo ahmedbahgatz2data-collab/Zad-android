@@ -2327,6 +2327,12 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    // Inject PrayerTimesGrid here for visual reference as seen in user request
+                    val prayerTimesState by viewModel.prayerTimes.collectAsStateWithLifecycle()
+                    PrayerTimesGrid(prayerTimes = prayerTimesState, settings = settings)
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -2907,10 +2913,14 @@ fun SettingsScreen(
                     onClick = {
                         val isTitleValid = reminderTitle.isNotBlank() || (attachedWorship != "بدون ربط" && attachedWorship != null)
                         if (isTitleValid) {
+                            val finalTitle = if (reminderTitle.isBlank() && attachedWorship != "بدون ربط" && attachedWorship != null) {
+                                "تنبيه $attachedWorship"
+                            } else reminderTitle
+
                             if (isEdit) {
                                 editingReminder?.let {
                                     viewModel.updateReminder(it.copy(
-                                        title = reminderTitle,
+                                        title = finalTitle,
                                         hour = reminderHour,
                                         minute = reminderMinute,
                                         soundUri = reminderSound,
@@ -2921,7 +2931,7 @@ fun SettingsScreen(
                                 }
                             } else {
                                 viewModel.addReminder(
-                                    title = reminderTitle,
+                                    title = finalTitle,
                                     hour = reminderHour,
                                     minute = reminderMinute,
                                     days = reminderRepeatDays,

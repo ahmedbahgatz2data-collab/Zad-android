@@ -761,6 +761,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 _notificationFlow.emit("يجب تسجيل الدخول أولاً لإنشاء مجموعة ⚠️")
                 return@launch
             }
+            
+            _notificationFlow.emit("جاري إنشاء المجموعة \"$groupName\"... ⏳")
             val randomCode = "ZAD-${(1000..9999).random()}"
             
             try {
@@ -770,26 +772,26 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                         "createdBy" to currentSet.googleUserId
                     )
-                ).addOnSuccessListener {
+                ).addOnCompleteListener { task ->
                     viewModelScope.launch {
-                        val updated = currentSet.copy(
-                            familyGroupName = groupName,
-                            familyGroupInviteCode = randomCode
-                        )
-                        repository.saveSettings(updated)
-                        _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
-                        
-                        repository.insertFamilyMembers(emptyList())
-                        syncProgressToCloud(currentProgress.value)
-                        listenToFamilyUpdates(randomCode)
-                    }
-                }.addOnFailureListener { e ->
-                    viewModelScope.launch {
-                        _notificationFlow.emit("فشل في إنشاء المجموعة: ${e.message} ❌")
+                        if (task.isSuccessful) {
+                            val updated = currentSet.copy(
+                                familyGroupName = groupName,
+                                familyGroupInviteCode = randomCode
+                            )
+                            repository.saveSettings(updated)
+                            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
+                            
+                            repository.insertFamilyMembers(emptyList())
+                            syncProgressToCloud(currentProgress.value)
+                            listenToFamilyUpdates(randomCode)
+                        } else {
+                            _notificationFlow.emit("فشل في إنشاء المجموعة: ${task.exception?.message} ❌")
+                        }
                     }
                 }
             } catch (e: Exception) {
-                _notificationFlow.emit("حدث خطأ تقني أثناء إنشاء المجموعة ❌")
+                _notificationFlow.emit("حدث خطأ تقني أثناء إنشاء المجموعة: ${e.message} ❌")
             }
         }
     }
@@ -804,31 +806,32 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             val trimmedCode = inviteCode.trim().uppercase()
             if (trimmedCode.isEmpty()) return@launch
 
+            _notificationFlow.emit("يتم التحقق من الكود والانضمام... ⏳")
+
             try {
                 firestore.collection("groups").document(trimmedCode).get()
-                    .addOnSuccessListener { doc ->
-                        if (doc.exists()) {
-                            val groupName = doc.getString("name") ?: "مجموعة زاد"
-                            viewModelScope.launch {
-                                val updated = currentSet.copy(
-                                    familyGroupName = groupName,
-                                    familyGroupInviteCode = trimmedCode
-                                )
-                                repository.saveSettings(updated)
-                                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
-                                
-                                repository.insertFamilyMembers(emptyList())
-                                syncProgressToCloud(currentProgress.value)
-                                listenToFamilyUpdates(trimmedCode)
-                            }
-                        } else {
-                            viewModelScope.launch {
-                                _notificationFlow.emit("عذراً، كود المجموعة غير صحيح أو المجموعة غير موجودة ❌")
-                            }
-                        }
-                    }.addOnFailureListener { e ->
+                    .addOnCompleteListener { task ->
                         viewModelScope.launch {
-                            _notificationFlow.emit("فشل في الانضمام: ${e.message} ❌")
+                            if (task.isSuccessful) {
+                                val doc = task.result
+                                if (doc != null && doc.exists()) {
+                                    val groupName = doc.getString("name") ?: "مجموعة زاد"
+                                    val updated = currentSet.copy(
+                                        familyGroupName = groupName,
+                                        familyGroupInviteCode = trimmedCode
+                                    )
+                                    repository.saveSettings(updated)
+                                    _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
+                                    
+                                    repository.insertFamilyMembers(emptyList())
+                                    syncProgressToCloud(currentProgress.value)
+                                    listenToFamilyUpdates(trimmedCode)
+                                } else {
+                                    _notificationFlow.emit("عذراً، كود المجموعة غير صحيح أو المجموعة غير موجودة ❌")
+                                }
+                            } else {
+                                _notificationFlow.emit("فشل في الاتصال للانضمام: ${task.exception?.message} ❌")
+                            }
                         }
                     }
             } catch (e: Exception) {
@@ -962,6 +965,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private var activeMediaPlayer: android.media.MediaPlayer? = null
+
     // Play Adhan Sound Preview (Audio Unlock Heuristic operation)
     fun unlockAudioAndPlayPreview() {
         _isAudioUnlocked.update { true }
@@ -975,20 +980,31 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             }
             
+            // Release existing if any
+            activeMediaPlayer?.let {
+                try { if (it.isPlaying) it.stop() } catch (e: Exception) {}
+                it.release()
+            }
+
             // Using a temporary MediaPlayer to play the sound for preview
             val mediaPlayer = android.media.MediaPlayer().apply {
                 setDataSource(getApplication(), uri)
                 prepare()
                 start()
             }
+            activeMediaPlayer = mediaPlayer
             
-            // Auto stop after 20 seconds for preview to not disturb but still feel like Adhan
-            Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    if (mediaPlayer.isPlaying) mediaPlayer.stop()
-                    mediaPlayer.release()
-                } catch (e: Exception) {}
-            }, 20000)
+            // Auto stop after 40 seconds to give a full adhan experience but ensure cleanup
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(40000)
+                if (activeMediaPlayer == mediaPlayer) {
+                    try {
+                        if (mediaPlayer.isPlaying) mediaPlayer.stop()
+                        mediaPlayer.release()
+                    } catch (e: Exception) {}
+                    activeMediaPlayer = null
+                }
+            }
 
             viewModelScope.launch {
                 _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة صوت الأذان المختار بنجاح! 🔊")
