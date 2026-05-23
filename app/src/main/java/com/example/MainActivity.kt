@@ -1549,7 +1549,7 @@ fun FamilyScreen(
                             FamilyMemberItemCard(
                                 member = member,
                                 onLikeClick = { viewModel.likeFamilyMember(member.userId, member.name) },
-                                onDeleteClick = { viewModel.deleteFamilyMember(member.id) }
+                                onDeleteClick = { viewModel.deleteFamilyMember(member.userId) }
                             )
                         }
                     }

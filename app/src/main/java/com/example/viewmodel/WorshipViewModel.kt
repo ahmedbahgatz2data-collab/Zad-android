@@ -210,16 +210,17 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        // Start listening to family group if already joined
+        // Reactively listen to family group changes
         viewModelScope.launch {
-            try {
-                val s = settings.first()
-                if (s.familyGroupInviteCode.isNotEmpty()) {
-                    listenToFamilyUpdates(s.familyGroupInviteCode)
+            settings.map { it.familyGroupInviteCode }
+                .distinctUntilChanged()
+                .collectLatest { code ->
+                    if (code.isNotEmpty()) {
+                        listenToFamilyUpdates(code)
+                    } else {
+                        familyListener?.remove()
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Error starting family listener: ${e.message}")
-            }
         }
 
         // Combine and listen to changes to automatically reschedule alarms
@@ -242,9 +243,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) return@addSnapshotListener
                 snapshot?.let { querySnapshot ->
-                    val members = querySnapshot.mapIndexed { index, doc ->
+                    val members = querySnapshot.map { doc ->
                         FamilyMember(
-                            id = index, // Room ID
                             userId = doc.id,
                             name = doc.getString("name") ?: "مجهول",
                             relation = "", 
@@ -300,10 +300,10 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             val list = repository.getFamilyMembers().first()
             if (list.isEmpty()) {
                 val initialFamily = listOf(
-                    FamilyMember(id = 1, userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
-                    FamilyMember(id = 2, userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
-                    FamilyMember(id = 3, userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
-                    FamilyMember(id = 4, userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
+                    FamilyMember(userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
+                    FamilyMember(userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
+                    FamilyMember(userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
+                    FamilyMember(userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
                 )
                 repository.insertFamilyMembers(initialFamily)
             }
@@ -633,32 +633,15 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // Like Family Member
-    fun likeFamilyMember(id: Int) {
-        viewModelScope.launch {
-            val list = familyMembers.value
-            val member = list.find { it.id == id }
-            if (member != null) {
-                val newLiked = !member.likedByMe
-                val newLikes = if (newLiked) member.likesCount + 1 else member.likesCount - 1
-                repository.updateFamilyLikes(id, newLikes, newLiked)
-
-                // Standard tactile feel
-                triggerStandardVibration()
-            }
-        }
-    }
-
     // Add Family Member
     fun addFamilyMember(name: String, relation: String) {
         viewModelScope.launch {
-            val currentList = familyMembers.value.toMutableList()
-            val nextId = (currentList.maxOfOrNull { it.id } ?: 0) + 1
+            val randomId = "manual-${System.currentTimeMillis()}"
             val randomProgress = (15..95).random().toFloat()
             val randomLastWorship = listOf("صلاة العصر", "الورد اليومي للقرآن", "أذكار الصباح", "صلاة النوافل").random()
             
             val newMember = FamilyMember(
-                id = nextId,
+                userId = randomId,
                 name = name,
                 relation = relation,
                 avatarUrl = "avatar${(1..4).random()}",
@@ -667,8 +650,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 likedByMe = false,
                 lastWorship = randomLastWorship
             )
-            currentList.add(newMember)
-            repository.insertFamilyMembers(currentList)
+            repository.insertFamilyMembers(listOf(newMember))
         }
     }
 
@@ -973,12 +955,10 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun deleteFamilyMember(id: Int) {
+    fun deleteFamilyMember(userId: String) {
         viewModelScope.launch {
-            val list = familyMembers.value.toMutableList()
-            list.removeAll { it.id == id }
-            repository.insertFamilyMembers(list)
-            _notificationFlow.emit("تم حذف فرد العائلة من المجموعة. 👥")
+            repository.deleteFamilyMember(userId)
+            _notificationFlow.emit("تم حذف فرد العائلة من القائمة المحلية. 👥")
         }
     }
 

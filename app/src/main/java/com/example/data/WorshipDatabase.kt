@@ -72,8 +72,7 @@ data class CustomReminder(
 
 @Entity(tableName = "family_sync")
 data class FamilyMember(
-    @PrimaryKey val id: Int,
-    val userId: String = "",
+    @PrimaryKey val userId: String,
     val name: String,
     val relation: String,
     val avatarUrl: String,
@@ -154,8 +153,11 @@ interface WorshipDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFamilyMembers(members: List<FamilyMember>)
 
-    @Query("UPDATE family_sync SET likesCount = :likes, likedByMe = :liked WHERE id = :id")
-    suspend fun updateFamilyLikes(id: Int, likes: Int, liked: Boolean)
+    @Query("UPDATE family_sync SET likesCount = :likes, likedByMe = :liked WHERE userId = :userId")
+    suspend fun updateFamilyLikes(userId: String, likes: Int, liked: Boolean)
+
+    @Query("DELETE FROM family_sync WHERE userId = :userId")
+    suspend fun deleteFamilyMember(userId: String)
 
     // Settings
     @Query("SELECT * FROM app_settings WHERE id = 1")
@@ -170,7 +172,7 @@ interface WorshipDao {
 
 @Database(
     entities = [WorshipProgress::class, CustomReminder::class, FamilyMember::class, AppSettings::class],
-    version = 9,
+    version = 12,
     exportSchema = false
 )
 abstract class WorshipDatabase : RoomDatabase() {
@@ -185,7 +187,7 @@ abstract class WorshipDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     WorshipDatabase::class.java,
-                    "zad_worship_db"
+                    "zad_worship_db_v12"
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
@@ -207,7 +209,8 @@ class WorshipRepository(private val dao: WorshipDao) {
 
     fun getFamilyMembers(): Flow<List<FamilyMember>> = dao.getFamilyMembers()
     suspend fun insertFamilyMembers(members: List<FamilyMember>) = dao.insertFamilyMembers(members)
-    suspend fun updateFamilyLikes(id: Int, likes: Int, liked: Boolean) = dao.updateFamilyLikes(id, likes, liked)
+    suspend fun updateFamilyLikes(userId: String, likes: Int, liked: Boolean) = dao.updateFamilyLikes(userId, likes, liked)
+    suspend fun deleteFamilyMember(userId: String) = dao.deleteFamilyMember(userId)
 
     fun getSettings(): Flow<AppSettings?> = dao.getSettings()
     suspend fun getSettingsImmediate(): AppSettings? = dao.getSettingsImmediate()
