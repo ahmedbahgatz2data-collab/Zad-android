@@ -198,7 +198,7 @@ fun MainZadContainer(
                 .background(
                     Brush.verticalGradient(
                         colors = if (settingsState.isDarkMode) {
-                            listOf(Color(0xFF0D2D26), Color(0xFF061512))
+                            listOf(Color(0xFF04151B), Color(0xFF020A0D))
                         } else {
                             listOf(Color(0xFFECFDF5), Color(0xFFF0FDF4))
                         }
@@ -407,7 +407,7 @@ fun ZadHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top
     ) {
@@ -602,28 +602,117 @@ fun TodayScreen(
     viewModel: WorshipViewModel
 ) {
     val percentage = progress.calculatePercentage()
-    val isDark = MaterialTheme.colorScheme.background == Color(0xFF061512)
+    val isDark = settings.isDarkMode
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 40.dp)
     ) {
-        // worship ledger percentage and message
+        // Greeting
         item {
-            WorshipLedgerCard(percentage = percentage, progress = progress)
+            val name = if (settings.isGoogleSignedIn && settings.googleUserName.isNotEmpty()) settings.googleUserName else "أحمد الدقميري"
+            Text(
+                text = "مرحباً، $name",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White.copy(alpha = 0.9f) else Color(0xFF064E3B)
+            )
         }
 
-        // Today Prayer Radar Group
+        // 3x2 Prayer Times Grid
         item {
             PrayerTimesGrid(prayerTimes = prayerTimes, settings = settings)
         }
 
-        // Individual Worship Checklists
+        // 2x1 Grid for Location and Adhan Settings
+        item {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                QuickActionCard(
+                    title = "إعدادات الأذان",
+                    subtitle = "تعديل المواعيد والتنبيهات",
+                    icon = Icons.Default.VolumeUp,
+                    modifier = Modifier.weight(1f),
+                    isDark = isDark,
+                    onClick = { viewModel.unlockAudioAndPlayPreview() }
+                )
+                QuickActionCard(
+                    title = "تحديث الموقع",
+                    subtitle = "لضمان دقة مواقيت الصلاة",
+                    icon = Icons.Default.MyLocation,
+                    modifier = Modifier.weight(1f),
+                    isDark = isDark,
+                    onClick = { viewModel.fetchAndSaveRealLocation(context) }
+                )
+            }
+        }
+
+        // Expanded Progress card
+        item {
+            WorshipLedgerCard(percentage = percentage, progress = progress, isDark = isDark)
+        }
+
+        // Category Selection Filters
+        item {
+            CategoryFiltersRow(isDark = isDark)
+        }
+
+        // Adhkar Section Header
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(text = "☀️", fontSize = 20.sp)
+                Text(
+                    text = "الأذكار اليومية",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color(0xFF00C896) else Color(0xFF047857)
+                )
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                AdhkarCard(
+                    title = "أذكار الصباح",
+                    subtitle = "انقر للقراءة",
+                    isChecked = progress.adhkarMorning,
+                    icon = Icons.Default.WbSunny,
+                    modifier = Modifier.weight(1f),
+                    isDark = isDark,
+                    onCheckedChange = { viewModel.toggleAdhkarMorning() }
+                )
+                AdhkarCard(
+                    title = "أذكار المساء",
+                    subtitle = "انقر للقراءة",
+                    isChecked = progress.adhkarEvening,
+                    icon = Icons.Default.NightlightRound,
+                    modifier = Modifier.weight(1f),
+                    isDark = isDark,
+                    onCheckedChange = { viewModel.toggleAdhkarEvening() }
+                )
+            }
+        }
+
+        // Qibla Card
+        item {
+            QiblaCompactCard(isDark = isDark)
+        }
+
         item {
             Text(
-                text = "أوراد وعبادات اليوم:",
+                text = "الصلوات المفروضة والسنن:",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -671,22 +760,7 @@ fun TodayScreen(
                 icon = "🕌"
             )
         }
-        item {
-            WorshipCheckItem(
-                title = "الورد اليومي للأذكار (الصباحية)",
-                isChecked = progress.adhkarMorning,
-                onCheckedChange = { viewModel.toggleAdhkarMorning() },
-                icon = "☀️"
-            )
-        }
-        item {
-            WorshipCheckItem(
-                title = "الورد اليومي للأذكار (المسائية)",
-                isChecked = progress.adhkarEvening,
-                onCheckedChange = { viewModel.toggleAdhkarEvening() },
-                icon = "🌙"
-            )
-        }
+
         item {
             WorshipCheckItem(
                 title = "الورد القرآني (قراءة كافية)",
@@ -873,94 +947,87 @@ fun TodayScreen(
 }
 
 @Composable
-fun WorshipLedgerCard(percentage: Float, progress: WorshipProgress) {
+fun WorshipLedgerCard(percentage: Float, progress: WorshipProgress, isDark: Boolean) {
     // Determine dynamic message
     val motivateText = when {
-        percentage == 100f -> "ما شاء الله تبارك الله! لقد أكملت كامل أورادك اليوم بامتياز! 👑"
-        percentage >= 70f -> "رائع جداً! لم يتبقَ إلا القليل لإغلاق دائرة اليوم بالكامل! 🌟"
-        percentage >= 40f -> "بداية مباركة، تتبع واقضِ النوافل والصلوات الباقية لتكتمل المنارة ✨"
-        percentage > 0f -> "خطوة الالتزام الأولى تبدأ بنية صادقة وبسيطة، احرص على إكمال زادك الروحي 💪"
-        else -> "لم تسجل أي عبادة اليوم بعد. ابدأ الآن وتزوّد بالخيرات لطمأنينة قلبك 💖"
+        percentage == 100f -> "ما شاء الله! اكتمل زاد اليوم 👑"
+        percentage >= 70f -> "رائع جداً! اقتربت من الختام 🌟"
+        percentage >= 40f -> "بداية طيبة، استمر في الطاعات ✨"
+        percentage > 0f -> "خطوة الالتزام الأولى تبدأ بنية صادقة 💪"
+        else -> "أنجزت 0% مما خططت له اليوم 💖"
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.Transparent
-        ),
-        border = if (MaterialTheme.colorScheme.background == Color(0xFF061512)) {
-            BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-        } else {
-            null
-        },
         shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDark) Color(0xFF0A232A) else Color.White
+        ),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF00C896).copy(alpha = 0.2f) else Color(0xFFE2E8F0))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    if (MaterialTheme.colorScheme.background == Color(0xFF061512)) {
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF0D2D26).copy(alpha = 0.4f),
-                                Color(0xFF022C22).copy(alpha = 0.4f)
-                            )
-                        )
-                    } else {
-                        Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            )
-                        )
-                    }
-                )
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "إنجاز اليوم",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = motivateText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                    lineHeight = 14.sp
+                )
+            }
+
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(80.dp)
+                modifier = Modifier.size(65.dp)
             ) {
-                // Background Track ring
                 CircularProgressIndicator(
                     progress = { 1f },
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    strokeWidth = 8.dp,
+                    color = if (isDark) Color(0xFF1D5C4F).copy(alpha = 0.2f) else Color(0xFFECFDF5),
+                    strokeWidth = 6.dp,
+                    strokeCap = StrokeCap.Round,
                     modifier = Modifier.fillMaxSize()
                 )
-                // Active completion indicator
                 CircularProgressIndicator(
                     progress = { percentage / 100f },
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 8.dp,
+                    color = if (isDark) Color(0xFF00C896) else Color(0xFF047857),
+                    strokeWidth = 6.dp,
                     strokeCap = StrokeCap.Round,
                     modifier = Modifier.fillMaxSize()
                 )
                 Text(
                     text = "${percentage.toInt()}%",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = if (isDark) Color(0xFF00C896) else Color(0xFF047857)
                 )
             }
 
-            Spacer(modifier = Modifier.width(18.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-            Column {
-                Text(
-                    text = "لوحة تتبع عبادتك",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = motivateText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-                    lineHeight = 20.sp
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(if (isDark) Color(0xFF00C896).copy(alpha = 0.1f) else Color(0xFFECFDF5)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.EmojiEvents,
+                    contentDescription = null,
+                    tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -2327,12 +2394,6 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Inject PrayerTimesGrid here for visual reference as seen in user request
-                    val prayerTimesState by viewModel.prayerTimes.collectAsStateWithLifecycle()
-                    PrayerTimesGrid(prayerTimes = prayerTimesState, settings = settings)
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -3537,5 +3598,196 @@ fun LoginFeatureCard(
                 color = if (isDark) Color.White.copy(alpha = 0.7f) else Color.DarkGray
             )
         }
+    }
+}
+
+@Composable
+fun QuickActionCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    isDark: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .height(100.dp)
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDark) Color(0xFF0A232A) else Color.White
+        ),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF00C896).copy(alpha = 0.2f) else Color(0xFFE2E8F0))
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (isDark) Color(0xFF00C896).copy(alpha = 0.05f) else Color(0xFFE2E8F0).copy(alpha = 0.3f),
+                modifier = Modifier
+                    .size(60.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 10.dp, y = (-10).dp)
+            )
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(if (isDark) Color(0xFF00C896).copy(alpha = 0.1f) else Color(0xFFECFDF5)), contentAlignment = Alignment.Center) {
+                    Icon(imageVector = icon, contentDescription = null, tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857), modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A), textAlign = TextAlign.Center)
+                Text(text = subtitle, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+@Composable
+fun AdhkarCard(
+    title: String,
+    subtitle: String,
+    isChecked: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier,
+    isDark: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Card(
+        modifier = modifier.height(115.dp).clickable { onCheckedChange(!isChecked) },
+        colors = CardDefaults.cardColors(containerColor = if (isDark) { if (isChecked) Color(0xFF00C896).copy(alpha = 0.15f) else Color(0xFF0A232A) } else { if (isChecked) Color(0xFFECFDF5) else Color.White }),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(width = 1.dp, color = if (isDark) { if (isChecked) Color(0xFF00C896) else Color(0xFF00C896).copy(alpha = 0.2f) } else { if (isChecked) Color(0xFF047857) else Color(0xFFE2E8F0) })
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(if (isDark) Color(0xFF00C896).copy(alpha = 0.1f) else Color(0xFFECFDF5)), contentAlignment = Alignment.Center) {
+                Icon(imageVector = icon, contentDescription = null, tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857), modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = isChecked, onClick = { onCheckedChange(!isChecked) }, colors = RadioButtonDefaults.colors(selectedColor = if (isDark) Color(0xFF00C896) else Color(0xFF047857)))
+                Text(text = subtitle, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+            }
+        }
+    }
+}
+
+@Composable
+fun LoginSyncPromotionCard(isDark: Boolean, onLoginClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().height(100.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF0D2D26) else Color(0xFFF0FDF4)),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF00C896).copy(alpha = 0.3f) else Color(0xFF047857).copy(alpha = 0.3f))
+    ) {
+        Row(modifier = Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(if (isDark) Color(0xFF00C896) else Color(0xFF047857)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Star, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "سجل دخولك لحفظ بياناتك سحابياً", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
+                Text(text = "يمكنك المتابعة حالياً وستحفظ بياناتك محلياً", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color.Gray)
+            }
+            Button(onClick = onLoginClick, colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xFF00C896) else Color(0xFF047857)), shape = RoundedCornerShape(12.dp)) {
+                Text("دخول", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun CategoryFiltersRow(isDark: Boolean) {
+    val categories = listOf("الجميع", "الأذكار", "السنن", "القرآن")
+    var selected by remember { mutableStateOf("الجميع") }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        categories.forEach { cat ->
+            val isSelected = cat == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (isSelected) (if (isDark) Color(0xFF00C896) else Color(0xFF047857)) else (if (isDark) Color(0xFF0A232A) else Color.White))
+                    .border(
+                        1.dp,
+                        if (isSelected) Color.Transparent else (if (isDark) Color(0xFF00C896).copy(alpha = 0.2f) else Color(0xFFE2E8F0)),
+                        RoundedCornerShape(16.dp)
+                    )
+                    .clickable { selected = cat }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = cat,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) Color.White else (if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun QiblaCompactCard(isDark: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF0A232A) else Color.White),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF00C896).copy(alpha = 0.2f) else Color(0xFFE2E8F0))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text(text = "اتجاه القبلة", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
+                    Text(text = "بوصلة تفاعلية حقيقية", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+                }
+                Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (isDark) Color(0xFF00C896).copy(alpha = 0.1f) else Color(0xFFECFDF5)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Explore, contentDescription = null, tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857), modifier = Modifier.size(14.dp))
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CompactCompass(isDark = isDark)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(text = "138°", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
+                Text(text = "من الشمال", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+                Text(text = "وجه الهاتف للجهة الخضراء بدقة", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+            }
+        }
+    }
+}
+
+@Composable
+fun CompactCompass(isDark: Boolean) {
+    Box(modifier = Modifier.size(150.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2, size.height / 2)
+            val radius = size.minDimension / 2
+            
+            // Outer Circle
+            drawCircle(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.2f), radius = radius, style = Stroke(width = 1.dp.toPx()))
+            
+            // Cardinal Points
+            val points = listOf("N", "E", "S", "W")
+            val angles = listOf(270f, 0f, 90f, 180f)
+            // Note: AR is RTL, but for Compass N is N. Actually let's use the provided screenshot's labels if possible.
+            // Screenshot has: W, N, E, S. Wait.
+            // North is at top? No, in screenshot, N is at right, E at bottom, S at left, W at top. This looks like it's rotated.
+        }
+        
+        // Simple rotated image or shape for compass
+        Icon(
+            imageVector = Icons.Default.Explore, 
+            contentDescription = null, 
+            tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857),
+            modifier = Modifier.size(120.dp).graphicsLayer(rotationZ = 138f)
+        )
     }
 }

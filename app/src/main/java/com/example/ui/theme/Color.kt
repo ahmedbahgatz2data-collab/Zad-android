@@ -13,14 +13,14 @@ val LightSurface = Color(0xFFFFFFFF)       // Crisp pure white cards
 val LightOnBackground = Color(0xFF064E3B)  // Dark forestry green text
 val LightOnSurface = Color(0xFF064E3B)
 
-// Dark Midnight and Ink Palette
-val DarkPrimary = Color(0xFF10B981)        // Radiant Emerald Green
+// Dark Midnight and Ink Palette (Emerald Theme)
+val DarkPrimary = Color(0xFF00C896)        // Vibrant Emerald Green
 val DarkOnPrimary = Color(0xFFFFFFFF)
-val DarkPrimaryContainer = Color(0xFF0D2D26) // Deep emerald-900/40 container
+val DarkPrimaryContainer = Color(0xFF0D2D26) // Deep emerald container
 val DarkSecondary = Color(0xFF34D399)      // Bright minty emerald
 val DarkTertiary = Color(0xFF0EA5E9)       // Teal/Sky Blue
-val DarkBackground = Color(0xFF061512)     // Sophisticated Deep Dark Emerald Green
-val DarkSurface = Color(0xFF0A221E)        // Sophisticated Dark Emerald Glass/Solid Surface
+val DarkBackground = Color(0xFF04151B)     // Very Deep Dark Teal/Navy
+val DarkSurface = Color(0xFF0A232A)        // Deep Teal Card Surface
 val DarkOnBackground = Color(0xFFE2E8F0)   // Slate 100
 val DarkOnSurface = Color(0xFFF1F5F9)      // Slate 50
 

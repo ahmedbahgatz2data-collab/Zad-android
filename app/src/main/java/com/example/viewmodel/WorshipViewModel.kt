@@ -350,11 +350,14 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
     // Sync current progress to Firestore if in a group
     private fun syncProgressToCloud(progress: WorshipProgress) {
+        syncProgressToCloudExplicit(progress, settings.value.familyGroupInviteCode)
+    }
+
+    private fun syncProgressToCloudExplicit(progress: WorshipProgress, groupCode: String) {
         val set = settings.value
-        if (set.isGoogleSignedIn && set.familyGroupInviteCode.isNotEmpty()) {
+        if (set.isGoogleSignedIn && groupCode.isNotEmpty()) {
             try {
                 val userId = set.googleUserId
-                val groupCode = set.familyGroupInviteCode
                 val percentage = progress.calculatePercentage()
                 
                 val membersRef = firestore.collection("groups").document(groupCode).collection("members")
@@ -780,10 +783,24 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                                 familyGroupInviteCode = randomCode
                             )
                             repository.saveSettings(updated)
+                            
+                            // ❗ Add the creator themselves as first member
+                            val me = FamilyMember(
+                                userId = currentSet.googleUserId,
+                                name = currentSet.googleUserName,
+                                relation = "مالك المجموعة",
+                                avatarUrl = currentSet.googleUserAvatarUrl,
+                                progress = currentProgress.value.calculatePercentage(),
+                                lastWorship = "الآن"
+                            )
+                            firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(me)
+
+                            // Important: Use the new randomCode immediately because settings.value is still stale
+                            syncProgressToCloudExplicit(currentProgress.value, randomCode)
+                            
                             _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
                             
-                            repository.insertFamilyMembers(emptyList())
-                            syncProgressToCloud(currentProgress.value)
+                            repository.insertFamilyMembers(listOf(me))
                             listenToFamilyUpdates(randomCode)
                         } else {
                             _notificationFlow.emit("فشل في إنشاء المجموعة: ${task.exception?.message} ❌")
@@ -821,10 +838,24 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                                         familyGroupInviteCode = trimmedCode
                                     )
                                     repository.saveSettings(updated)
+                                    
+                                    // ❗ Add the user as a member when joining
+                                    val me = FamilyMember(
+                                        userId = currentSet.googleUserId,
+                                        name = currentSet.googleUserName,
+                                        relation = "عضو",
+                                        avatarUrl = currentSet.googleUserAvatarUrl,
+                                        progress = currentProgress.value.calculatePercentage(),
+                                        lastWorship = "الآن"
+                                    )
+                                    firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(me)
+                                    
+                                    // Use explicit code for immediate first sync
+                                    syncProgressToCloudExplicit(currentProgress.value, trimmedCode)
+                                    
                                     _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $groupName! 🟢")
                                     
-                                    repository.insertFamilyMembers(emptyList())
-                                    syncProgressToCloud(currentProgress.value)
+                                    repository.insertFamilyMembers(listOf(me))
                                     listenToFamilyUpdates(trimmedCode)
                                 } else {
                                     _notificationFlow.emit("عذراً، كود المجموعة غير صحيح أو المجموعة غير موجودة ❌")
@@ -970,55 +1001,53 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     // Play Adhan Sound Preview (Audio Unlock Heuristic operation)
     fun unlockAudioAndPlayPreview() {
         _isAudioUnlocked.update { true }
-        try {
-            val set = settings.value
-            val uriStr = set.customAdhanSoundUri
-            
-            val uri = if (uriStr != "default" && uriStr.isNotEmpty()) {
-                android.net.Uri.parse(uriStr)
-            } else {
-                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            }
-            
-            // Release existing if any
-            activeMediaPlayer?.let {
-                try { if (it.isPlaying) it.stop() } catch (e: Exception) {}
-                it.release()
-            }
-
-            // Using a temporary MediaPlayer to play the sound for preview
-            val mediaPlayer = android.media.MediaPlayer().apply {
-                setDataSource(getApplication(), uri)
-                prepare()
-                start()
-            }
-            activeMediaPlayer = mediaPlayer
-            
-            // Auto stop after 40 seconds to give a full adhan experience but ensure cleanup
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(40000)
-                if (activeMediaPlayer == mediaPlayer) {
-                    try {
-                        if (mediaPlayer.isPlaying) mediaPlayer.stop()
-                        mediaPlayer.release()
-                    } catch (e: Exception) {}
-                    activeMediaPlayer = null
-                }
-            }
-
-            viewModelScope.launch {
-                _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة صوت الأذان المختار بنجاح! 🔊")
-            }
-            triggerStandardVibration()
-        } catch (e: Throwable) {
-            e.printStackTrace()
-            // Fallback to simple ringtone if direct URI fails
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val ringtone = RingtoneManager.getRingtone(getApplication(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
-                ringtone?.play()
-            } catch (ex: Exception) {}
-            
-            viewModelScope.launch {
+                val set = settings.value
+                val uriStr = set.customAdhanSoundUri
+                
+                val uri = if (uriStr != "default" && uriStr.isNotEmpty()) {
+                    android.net.Uri.parse(uriStr)
+                } else {
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                }
+                
+                // Release existing if any
+                activeMediaPlayer?.let {
+                    try { if (it.isPlaying) it.stop() } catch (e: Exception) {}
+                    it.release()
+                }
+
+                // Using a temporary MediaPlayer to play the sound for preview
+                val mediaPlayer = android.media.MediaPlayer().apply {
+                    setDataSource(getApplication(), uri)
+                    prepare()
+                    start()
+                }
+                activeMediaPlayer = mediaPlayer
+                
+                // Auto stop after 40 seconds to give a full adhan experience but ensure cleanup
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(40000)
+                    if (activeMediaPlayer == mediaPlayer) {
+                        try {
+                            if (mediaPlayer.isPlaying) mediaPlayer.stop()
+                            mediaPlayer.release()
+                        } catch (e: Exception) {}
+                        activeMediaPlayer = null
+                    }
+                }
+
+                _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة صوت الأذان المختار بنجاح! 🔊")
+                triggerStandardVibration()
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                // Fallback to simple ringtone if direct URI fails
+                try {
+                    val ringtone = RingtoneManager.getRingtone(getApplication(), RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+                    ringtone?.play()
+                } catch (ex: Exception) {}
+                
                 _notificationFlow.emit("تم تفعيل مكبر الصوت وتجربة التنبيه الافتراضي. 🔊")
             }
         }

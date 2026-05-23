@@ -34,19 +34,21 @@ class WorshipReceiver : BroadcastReceiver() {
             val manager = context.getSystemService(NotificationManager::class.java)
             if (manager.getNotificationChannel(channelId) == null) {
                 val attributes = android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build()
                 
                 val channel = NotificationChannel(
                     channelId,
-                    "تنبيه: زاد العبادة",
+                    "تنبيه: زاد العبادة الأكبر",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "تنبيهات العبادات والأذكار"
+                    description = "تنبيهات العبادات والأذكار والأذان"
                     enableLights(true)
                     enableVibration(true)
                     setSound(soundUri, attributes)
+                    setBypassDnd(true)
+                    setLockscreenVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 }
                 manager.createNotificationChannel(channel)
             }
@@ -56,11 +58,15 @@ class WorshipReceiver : BroadcastReceiver() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(message)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
+            .setOngoing(true)
             .setSound(soundUri)
+            .setLocalOnly(true)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
 
         if (attachedWorship != null) {
             val actionIntent = Intent(context, WorshipActionReceiver::class.java).apply {
@@ -76,9 +82,12 @@ class WorshipReceiver : BroadcastReceiver() {
             builder.addAction(0, "تمت العبادة ✅", actionPendingIntent)
         }
 
+        val notification = builder.build()
+        notification.flags = notification.flags or android.app.Notification.FLAG_INSISTENT
+        
         val manager = NotificationManagerCompat.from(context)
         try {
-            manager.notify(System.currentTimeMillis().toInt(), builder.build())
+            manager.notify(notificationId, notification)
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
