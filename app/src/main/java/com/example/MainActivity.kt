@@ -520,9 +520,10 @@ fun ZadHeader(
             Text(
                 text = "زاد",
                 style = MaterialTheme.typography.headlineLarge,
+                fontFamily = com.example.ui.theme.ZadLogoFont,
                 fontWeight = FontWeight.Black,
                 color = if (isDark) Color.White else Color(0xFF047857),
-                fontSize = 32.sp
+                fontSize = 42.sp
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -3555,9 +3556,10 @@ fun AppWideWelcomeLoginScreen(
         Text(
             text = "زاد",
             style = MaterialTheme.typography.displayLarge,
+            fontFamily = com.example.ui.theme.ZadLogoFont,
             fontWeight = FontWeight.Black,
             color = if (isDark) Color.White else Color(0xFF047857),
-            fontSize = 72.sp
+            fontSize = 92.sp
         )
         Text(
             text = "رفيق المسلم اليومي للعبادات والطاعة",
