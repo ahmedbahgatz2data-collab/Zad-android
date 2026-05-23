@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "873782121602",
+    "project_id": "planar-cycle-299417",
+    "storage_bucket": "planar-cycle-299417.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:873782121602:android:0d644ec5337d8b9181509b",
+        "android_client_info": {
+          "package_name": "com.aistudio.zad.worship.rhmvst"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "873782121602-75uh4i3g0ogv0an6fvm52bakq9l5rj6h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.zad.worship.rhmvst",
+            "certificate_hash": "f4187f7abaea9aff391193659840087d18c8bd10"
+          }
+        },
+        {
+          "client_id": "873782121602-aq7apuiauvii8jt4mkkc41p33j1iai08.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBVmFDaieQeZQ_bBTVg-shMkLlrUebQ2po"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "873782121602-anp4mslegiv3ce8k5hif90rmh4694kjt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
