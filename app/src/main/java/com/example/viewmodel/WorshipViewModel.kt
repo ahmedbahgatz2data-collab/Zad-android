@@ -984,60 +984,75 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 lastWorship = "الآن"
             )
 
-            // Try contacting cloud Firestore synchronously
+            // Optimistic Local Join First!
+            val localGroupName = "مجموعة زاد العائلية"
+            
+            val optimisticUpdated = updatedBase.copy(
+                familyGroupName = localGroupName,
+                familyGroupInviteCode = trimmedCode
+            )
+            repository.saveSettings(optimisticUpdated)
+            repository.insertFamilyMembers(listOf(me))
+            
+            _notificationFlow.emit("تم الانضمام للمجموعة! جاري المزامنة... 🟢")
+
+            try {
+                // Queue my membership write immediately (works offline)
+                val meMap = mapOf(
+                     "userId" to me.userId,
+                     "name" to me.name,
+                     "relation" to me.relation,
+                     "avatarUrl" to me.avatarUrl,
+                     "progress" to me.progress,
+                     "likesCount" to me.likesCount,
+                     "lastWorship" to me.lastWorship
+                )
+                firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(meMap)
+                firestore.collection("users").document(me.userId).set(
+                    mapOf(
+                        "activeGroupCode" to trimmedCode,
+                        "activeGroupName" to localGroupName
+                    )
+                )
+                syncProgressToCloudExplicit(currentProgress.value, trimmedCode)
+                listenToFamilyUpdates(trimmedCode)
+            } catch (e: Exception) {
+                // Ignore queue errors
+            }
+
+            // Try contacting cloud Firestore synchronously to get the REAL group name
             try {
                 firestore.collection("groups").document(trimmedCode).get()
                     .addOnCompleteListener { task ->
                         viewModelScope.launch {
                             if (task.isSuccessful && task.result != null && task.result!!.exists()) {
                                 val doc = task.result!!
-                                val actualGroupName = doc.getString("name") ?: "مجموعة زاد العائلية"
+                                val actualGroupName = doc.getString("name") ?: localGroupName
                                 
-                                val finalUpdated = updatedBase.copy(
-                                    familyGroupName = actualGroupName,
-                                    familyGroupInviteCode = trimmedCode
+                                val finalUpdated = optimisticUpdated.copy(
+                                    familyGroupName = actualGroupName
                                 )
                                 repository.saveSettings(finalUpdated)
-                                repository.insertFamilyMembers(listOf(me))
                                 
+                                // Also update the user activeGroupName
                                 try {
-                                    val meMap = mapOf(
-                                         "userId" to me.userId,
-                                         "name" to me.name,
-                                         "relation" to me.relation,
-                                         "avatarUrl" to me.avatarUrl,
-                                         "progress" to me.progress,
-                                         "likesCount" to me.likesCount,
-                                         "lastWorship" to me.lastWorship
-                                    )
-                                    firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(meMap)
-                                    firestore.collection("users").document(me.userId).set(
-                                        mapOf(
-                                            "activeGroupCode" to trimmedCode,
-                                            "activeGroupName" to actualGroupName
-                                        )
-                                    )
-                                    syncProgressToCloudExplicit(currentProgress.value, trimmedCode)
-                                    listenToFamilyUpdates(trimmedCode)
-                                } catch (e: Exception) {
-                                    Log.e("WorshipViewModel", "Error syncing locally joined group: ${e.message}")
-                                }
+                                    firestore.collection("users").document(me.userId).update("activeGroupName", actualGroupName)
+                                } catch (e:Exception) {}
                                 
-                                _notificationFlow.emit("تم الانضمام بنجاح لمجموعة $actualGroupName! 🟢")
+                                _notificationFlow.emit("تم مزامنة اسم المجموعة العائلية واستعادة البيانات بنجاح: $actualGroupName 👥")
                             } else {
+                                // Background sync failed or group doesn't exist yet, but we stay optimistic.
+                                // Don't revert the join. Let them stay in the group until they leave.
                                 val msg = task.exception?.message ?: ""
-                                if (msg.contains("offline", ignoreCase = true)) {
-                                    _notificationFlow.emit("حدث خطأ: أنت غير متصل بالإنترنت ⚠️")
-                                } else {
-                                    _notificationFlow.emit("رمز الدعوة غير صحيح أو المجموعة غير موجودة ⚠️")
+                                if (!msg.contains("offline", ignoreCase = true) && task.isSuccessful) {
+                                    // It actually doesn't exist!
+                                   _notificationFlow.emit("ملاحظة: رمز الدعوة غير متوفر حالياً على الخادم، سيتم إنشاؤه عند اتصالك ومشاركتك ⚠️")
                                 }
                             }
                         }
                     }
             } catch (e: Exception) {
-                val msg = e.message ?: ""
-                val err = if (msg.contains("offline", ignoreCase = true)) "أنت غير متصل بالإنترنت" else "تأكد من اتصالك بالإنترنت"
-                _notificationFlow.emit("حدث خطأ: $err ⚠️")
+                // Background get error
             }
         }
     }
