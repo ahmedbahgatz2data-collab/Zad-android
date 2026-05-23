@@ -1445,6 +1445,33 @@ fun FamilyScreen(
             // Signed In Family Circle view
             var showRenameDialog by remember { mutableStateOf(false) }
             var newGroupName by remember { mutableStateOf(settings.familyGroupName) }
+            var showLeaveGroupConfirm by remember { mutableStateOf(false) }
+
+            if (showLeaveGroupConfirm) {
+                AlertDialog(
+                    onDismissRequest = { showLeaveGroupConfirm = false },
+                    title = { Text("مغادرة المجموعة العائلية ⚠️", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text("هل أنت متأكد من رغبتك في مغادرة المجموعة العائلية؟ لن تتمكن من رؤية تقدم وتفاعلات أفراد عائلتك بعد الآن.")
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.leaveFamilyGroup()
+                                showLeaveGroupConfirm = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("تأكيد المغادرة")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showLeaveGroupConfirm = false }) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
+            }
 
             if (showRenameDialog) {
                 AlertDialog(
@@ -1618,7 +1645,9 @@ fun FamilyScreen(
                                             text = settings.familyGroupInviteCode,
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                     }
                                 }
@@ -1629,6 +1658,31 @@ fun FamilyScreen(
                                     lineHeight = 18.sp,
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                                 )
+                                Button(
+                                    onClick = {
+                                        val shareText = "انضم إلي في مجموعة زاد العائلية \"${settings.familyGroupName}\" للتسابق والتشجيع اليومي بالعبادات وطاعات الصلاة! كود الدعوة المباشر للمجموعة: ${settings.familyGroupInviteCode}\n\nرابط تحميل وتصفح التطبيق للجميع: https://ais-pre-stoxjjheb7fspzk4ww4dgt-604761836401.europe-west2.run.app"
+                                        val sendIntent = android.content.Intent().apply {
+                                            action = android.content.Intent.ACTION_SEND
+                                            putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                            type = "text/plain"
+                                        }
+                                        val shareIntent = android.content.Intent.createChooser(sendIntent, "مشاركة كود ورابط المجموعة")
+                                        context.startActivity(shareIntent)
+                                    },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("مشاركة كود ورابط المجموعة 🔗", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -1672,7 +1726,7 @@ fun FamilyScreen(
                     item {
                         Spacer(modifier = Modifier.height(20.dp))
                         OutlinedButton(
-                            onClick = { viewModel.leaveFamilyGroup() },
+                            onClick = { showLeaveGroupConfirm = true },
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
                             modifier = Modifier.fillMaxWidth(),
@@ -2779,12 +2833,33 @@ fun SettingsScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "القارئ النشط للتنبيه: ${settings.selectedReciter}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
-                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "مستوى صوت التنبيهات والأذان:",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1.2f)
+                        )
+                        Slider(
+                            value = settings.notificationVolume,
+                            onValueChange = { viewModel.updateNotificationVolume(it) },
+                            valueRange = 0f..1f,
+                            modifier = Modifier.weight(2f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${(settings.notificationVolume * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(0.5f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.End
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedButton(

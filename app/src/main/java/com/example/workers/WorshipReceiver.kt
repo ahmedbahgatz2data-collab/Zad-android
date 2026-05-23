@@ -35,27 +35,28 @@ class WorshipReceiver : BroadcastReceiver() {
         val soundUri = intent.getStringExtra("SOUND") ?: "default"
         val attachedWorship = intent.getStringExtra("ATTACHED_WORSHIP")
         val notificationId = intent.getIntExtra("ID", System.currentTimeMillis().toInt() and 0xfffffff)
+        val volume = intent.getFloatExtra("VOLUME", 1.0f)
 
-        showNotification(context, title, message, soundUri, attachedWorship, notificationId)
+        showNotification(context, title, message, soundUri, attachedWorship, notificationId, volume)
     }
 
-    private fun showNotification(context: Context, title: String, message: String, soundUriStr: String, attachedWorship: String?, notificationId: Int) {
+    companion object {
+        private var activeMediaPlayer: android.media.MediaPlayer? = null
+    }
+
+    private fun showNotification(context: Context, title: String, message: String, soundUriStr: String, attachedWorship: String?, notificationId: Int, volume: Float) {
         val soundUri = if (soundUriStr == "default" || soundUriStr.isBlank()) {
             android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
         } else {
             android.net.Uri.parse(soundUriStr)
         }
 
-        val channelId = "worship_channel_${soundUri.hashCode()}"
+        // Use a new channel ID to avoid system caching the old sound setting
+        val channelId = "worship_channel_silent_${soundUri.hashCode()}"
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(NotificationManager::class.java)
             if (manager.getNotificationChannel(channelId) == null) {
-                val attributes = android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-                
                 val channel = NotificationChannel(
                     channelId,
                     "تنبيه: زاد العبادة الأكبر",
@@ -64,12 +65,33 @@ class WorshipReceiver : BroadcastReceiver() {
                     description = "تنبيهات العبادات والأذكار والأذان"
                     enableLights(true)
                     enableVibration(true)
-                    setSound(soundUri, attributes)
+                    setSound(null, null) 
                     setBypassDnd(true)
                     setLockscreenVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 }
                 manager.createNotificationChannel(channel)
             }
+        }
+
+        try {
+            activeMediaPlayer?.release()
+            activeMediaPlayer = android.media.MediaPlayer().apply {
+                setDataSource(context, soundUri)
+                val attributes = android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+                setAudioAttributes(attributes)
+                setVolume(volume, volume)
+                setOnCompletionListener {
+                    it.release()
+                    activeMediaPlayer = null
+                }
+                prepare()
+                start()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
         val builder = NotificationCompat.Builder(context, channelId)
@@ -81,7 +103,6 @@ class WorshipReceiver : BroadcastReceiver() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setOngoing(false)
-            .setSound(soundUri)
             .setLocalOnly(true)
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)

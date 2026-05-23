@@ -196,6 +196,17 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     )
 
     init {
+        // Ensure anonymous auth for Firestore if not already signed in
+        try {
+            if (auth.currentUser == null) {
+                auth.signInAnonymously().addOnCompleteListener {
+                    android.util.Log.d("WorshipViewModel", "Anonymous auth initialized: ${it.isSuccessful}")
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         // Seed basic settings locally first
         seedInitialDataIfNeeded()
 
@@ -247,6 +258,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private var familyListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var myLastLikesCount: Int? = null
 
     private fun listenToFamilyUpdates(groupCode: String) {
         try {
@@ -270,18 +282,41 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         return@addSnapshotListener
                     }
                     snapshot?.let { querySnapshot ->
+                        val myUserId = settings.value.googleUserId
+                        var myNewLikes: Int? = null
+
                         val members = querySnapshot.map { doc ->
+                            val uId = doc.id
+                            val likes = doc.getLong("likesCount")?.toInt() ?: 0
+                            if (uId == myUserId) {
+                                myNewLikes = likes
+                            }
                             FamilyMember(
-                                userId = doc.id,
+                                userId = uId,
                                 name = doc.getString("name") ?: "مجهول",
-                                relation = "", 
+                                relation = doc.getString("relation") ?: "", 
                                 avatarUrl = doc.getString("avatarUrl") ?: "avatar1",
                                 progress = doc.getDouble("progress")?.toFloat() ?: 0f,
-                                likesCount = doc.getLong("likesCount")?.toInt() ?: 0,
+                                likesCount = likes,
                                 likedByMe = false, 
                                 lastWorship = doc.getString("lastWorship") ?: ""
                             )
                         }
+
+                        // Check if my likes increased to trigger a real-time notification with vibration feedback!
+                        if (myUserId.isNotEmpty() && myUserId != "default" && myNewLikes != null) {
+                            val lastLikes = myLastLikesCount
+                            if (lastLikes != null && myNewLikes!! > lastLikes) {
+                                viewModelScope.launch {
+                                    _notificationFlow.emit("🔔 رائع! تلقيت تفاعلاً وإعجاباً جديداً بعباداتكم اليومية 💖")
+                                    triggerStandardVibration()
+                                }
+                            }
+                            myLastLikesCount = myNewLikes
+                        } else if (myNewLikes != null) {
+                            myLastLikesCount = myNewLikes
+                        }
+
                         viewModelScope.launch {
                             try {
                                 repository.clearFamilyMembers()
@@ -705,6 +740,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 putExtra("TITLE", "اختبار التنبيه 🔔")
                 putExtra("MESSAGE", "هذا تنبيه تجريبي للتأكد من عمل النظام بشكل صحيح.")
                 putExtra("ID", 9999)
+                putExtra("VOLUME", settings.value.notificationVolume)
             }
             application.sendBroadcast(intent)
             viewModelScope.launch {
@@ -823,20 +859,17 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 finalUserId = "user_${(1000..9999).random()}"
                 finalUserName = "مستخدم زاد"
                 finalUserAvatar = "avatar${(1..4).random()}"
-                val updatedSign = currentSet.copy(
-                    isGoogleSignedIn = true,
-                    googleUserId = finalUserId,
-                    googleUserName = finalUserName,
-                    googleUserAvatarUrl = finalUserAvatar
-                )
-                repository.saveSettings(updatedSign)
             }
 
             val randomCode = "ZAD-${(1000..9999).random()}"
             _notificationFlow.emit("جاري إنشاء المجموعة \"$groupName\"... ⏳")
 
-            // 1. Instantly write to local Room Database so the UI transitions immediately!
-            val updated = settings.value.copy(
+            // 1. Instantly write the complete, non-racy updated AppSettings to local Room Database!
+            val updated = currentSet.copy(
+                isGoogleSignedIn = true,
+                googleUserId = finalUserId,
+                googleUserName = finalUserName,
+                googleUserAvatarUrl = finalUserAvatar,
                 familyGroupName = groupName,
                 familyGroupInviteCode = randomCode
             )
@@ -866,7 +899,16 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 ).addOnCompleteListener { task ->
                     if (task.isSuccessful) {
                         try {
-                             firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(me)
+                             val meMap = mapOf(
+                                 "userId" to me.userId,
+                                 "name" to me.name,
+                                 "relation" to me.relation,
+                                 "avatarUrl" to me.avatarUrl,
+                                 "progress" to me.progress,
+                                 "likesCount" to me.likesCount,
+                                 "lastWorship" to me.lastWorship
+                             )
+                             firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(meMap)
                              try {
                                  firestore.collection("users").document(me.userId).set(
                                      mapOf(
@@ -899,18 +941,19 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             var finalUserName = currentSet.googleUserName
             var finalUserAvatar = currentSet.googleUserAvatarUrl
 
-            // If not signed in, auto sign in locally so they can use group space
-            if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
+            // Structuring base sign-in safely to prevent any async write race conditions!
+            val updatedBase = if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
                 finalUserId = "user_${(1000..9999).random()}"
                 finalUserName = "مستخدم زاد"
                 finalUserAvatar = "avatar${(1..4).random()}"
-                val updatedSign = currentSet.copy(
+                currentSet.copy(
                     isGoogleSignedIn = true,
                     googleUserId = finalUserId,
                     googleUserName = finalUserName,
                     googleUserAvatarUrl = finalUserAvatar
                 )
-                repository.saveSettings(updatedSign)
+            } else {
+                currentSet
             }
 
             val trimmedCode = inviteCode.trim().uppercase()
@@ -939,14 +982,23 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                             if (task.isSuccessful && task.result != null && task.result!!.exists()) {
                                 val doc = task.result!!
                                 val groupName = doc.getString("name") ?: localGroupName
-                                val updated = settings.value.copy(
+                                val updated = updatedBase.copy(
                                     familyGroupName = groupName,
                                     familyGroupInviteCode = trimmedCode
                                 )
                                 repository.saveSettings(updated)
                                 
                                 try {
-                                    firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(me)
+                                    val meMap = mapOf(
+                                         "userId" to me.userId,
+                                         "name" to me.name,
+                                         "relation" to me.relation,
+                                         "avatarUrl" to me.avatarUrl,
+                                         "progress" to me.progress,
+                                         "likesCount" to me.likesCount,
+                                         "lastWorship" to me.lastWorship
+                                    )
+                                    firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(meMap)
                                     try {
                                         firestore.collection("users").document(me.userId).set(
                                             mapOf(
@@ -967,7 +1019,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                             } else {
                                 // Online check failed or not found, but we want to be supportive of offline/sandbox and mock codes!
                                 // So we join locally!
-                                val updated = settings.value.copy(
+                                val updated = updatedBase.copy(
                                     familyGroupName = localGroupName,
                                     familyGroupInviteCode = trimmedCode
                                 )
@@ -979,7 +1031,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     }
             } catch (e: Exception) {
                 // Instantly fallback to join locally
-                val updated = settings.value.copy(
+                val updated = updatedBase.copy(
                     familyGroupName = localGroupName,
                     familyGroupInviteCode = trimmedCode
                 )
@@ -1115,6 +1167,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun updateNotificationVolume(volume: Float) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            repository.saveSettings(currentSet.copy(notificationVolume = volume))
+        }
+    }
+
     fun toggleDarkMode(isEnabled: Boolean) {
         viewModelScope.launch {
             val currentSet = settings.value
@@ -1164,6 +1223,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 val mediaPlayer = android.media.MediaPlayer().apply {
                     setDataSource(getApplication(), uri)
                     prepare()
+                    val vol = set.notificationVolume
+                    setVolume(vol, vol)
                     start()
                 }
                 activeMediaPlayer = mediaPlayer
@@ -1378,6 +1439,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             putExtra("ID", id)
             putExtra("SOUND", sound)
             putExtra("ATTACHED_WORSHIP", attachedWorship)
+            putExtra("VOLUME", settings.value.notificationVolume)
         }
 
         val pendingIntent = android.app.PendingIntent.getBroadcast(

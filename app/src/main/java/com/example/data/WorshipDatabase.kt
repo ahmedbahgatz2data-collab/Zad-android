@@ -119,7 +119,8 @@ data class AppSettings(
 
     // Vibration Customization
     val isVibrationEnabled: Boolean = true,
-    val vibrationPattern: String = "نبض الفرح" // "نبض خفيف", "نبض الفرح", "نبض قوي ومستمر", "نبض متقطع"
+    val vibrationPattern: String = "نبض الفرح", // "نبض خفيف", "نبض الفرح", "نبض قوي ومستمر", "نبض متقطع"
+    val notificationVolume: Float = 1.0f
 )
 
 @Dao
