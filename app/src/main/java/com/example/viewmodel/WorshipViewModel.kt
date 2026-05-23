@@ -52,7 +52,7 @@ import kotlin.math.abs
 
 class WorshipViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth by lazy { Firebase.auth }
     private val database = WorshipDatabase.getDatabase(application)
     private val repository = WorshipRepository(database.dao())
 
