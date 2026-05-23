@@ -153,6 +153,9 @@ interface WorshipDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFamilyMembers(members: List<FamilyMember>)
 
+    @Query("DELETE FROM family_sync")
+    suspend fun clearFamilyMembers()
+
     @Query("UPDATE family_sync SET likesCount = :likes, likedByMe = :liked WHERE userId = :userId")
     suspend fun updateFamilyLikes(userId: String, likes: Int, liked: Boolean)
 
@@ -210,6 +213,7 @@ class WorshipRepository(private val dao: WorshipDao) {
 
     fun getFamilyMembers(): Flow<List<FamilyMember>> = dao.getFamilyMembers()
     suspend fun insertFamilyMembers(members: List<FamilyMember>) = dao.insertFamilyMembers(members)
+    suspend fun clearFamilyMembers() = dao.clearFamilyMembers()
     suspend fun updateFamilyLikes(userId: String, likes: Int, liked: Boolean) = dao.updateFamilyLikes(userId, likes, liked)
     suspend fun deleteFamilyMember(userId: String) = dao.deleteFamilyMember(userId)
 

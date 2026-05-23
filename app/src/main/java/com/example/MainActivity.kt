@@ -182,6 +182,26 @@ fun MainZadContainer(
     val settingsState by viewModel.settings.collectAsStateWithLifecycle()
     val streakCount by viewModel.worshipStreak.collectAsStateWithLifecycle()
     val isAudioUnlocked by viewModel.isAudioUnlocked.collectAsStateWithLifecycle()
+    val progressHistory by viewModel.history.collectAsStateWithLifecycle()
+
+    val last7DaysPercentages = remember(progressHistory, progress) {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val cal = java.util.Calendar.getInstance()
+        val dates = (0..6).map { i ->
+            val c = java.util.Calendar.getInstance()
+            c.add(java.util.Calendar.DAY_OF_YEAR, -i)
+            sdf.format(c.time)
+        }.reversed()
+        
+        dates.map { dateStr ->
+            if (dateStr == sdf.format(cal.time)) {
+                progress.calculatePercentage().toInt()
+            } else {
+                val found = progressHistory.find { it.date == dateStr }
+                found?.calculatePercentage()?.toInt() ?: 0
+            }
+        }
+    }
 
     // Host reactive toasts for family likes
     var activeBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -266,7 +286,7 @@ fun MainZadContainer(
                         )
                         "stats" -> StatsScreen(
                             streak = streakCount,
-                            history = listOf(70, 85, 90, 60, 100, 80, 95), // Completion % for the last 7 days
+                            history = last7DaysPercentages, // Real completion % for the last 7 days
                             viewModel = viewModel
                         )
                         "settings" -> SettingsScreen(
@@ -696,14 +716,7 @@ fun TodayScreen(
             }
         }
 
-        if (selectedCategory == "الجميع") {
-            // Qibla Card
-            item {
-                QiblaCompactCard(settings = settings, isDark = isDark)
-            }
-        }
-
-        if (selectedCategory == "الجميع" || selectedCategory == "السنن") {
+        if (selectedCategory == "الجميع" || selectedCategory == "الصلوات والسنن") {
             item {
                 Text(
                     text = "الصلوات المفروضة والسنن:",
@@ -767,7 +780,7 @@ fun TodayScreen(
             }
         }
 
-        if (selectedCategory == "الجميع" || selectedCategory == "السنن") {
+        if (selectedCategory == "الجميع" || selectedCategory == "الصلوات والسنن") {
             // Detailed Sunnah Segmented card
             item {
                 var isExpanded by remember { mutableStateOf(false) }
@@ -2199,7 +2212,15 @@ fun StatsScreen(
 @Composable
 fun WorshipBarChart(data: List<Int>) {
     val barColor = MaterialTheme.colorScheme.primary
-    val daysOfWeek = listOf("السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة")
+    // Generate actual last 7 weekdays dynamically in correct chronological order
+    val daysOfWeek = remember {
+        val sdf = java.text.SimpleDateFormat("E", java.util.Locale("ar"))
+        (0..6).map { i ->
+            val c = java.util.Calendar.getInstance()
+            c.add(java.util.Calendar.DAY_OF_YEAR, -i)
+            sdf.format(c.time)
+        }.reversed()
+    }
 
     Canvas(
         modifier = Modifier
@@ -3724,7 +3745,7 @@ fun LoginSyncPromotionCard(isDark: Boolean, onLoginClick: () -> Unit) {
 
 @Composable
 fun CategoryFiltersRow(selected: String, onCategorySelected: (String) -> Unit, isDark: Boolean) {
-    val categories = listOf("الجميع", "الأذكار", "السنن", "القرآن")
+    val categories = listOf("الجميع", "الأذكار", "الصلوات والسنن", "القرآن")
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

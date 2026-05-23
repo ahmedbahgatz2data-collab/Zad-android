@@ -284,7 +284,10 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         }
                         viewModelScope.launch {
                             try {
-                                repository.insertFamilyMembers(members)
+                                repository.clearFamilyMembers()
+                                if (members.isNotEmpty()) {
+                                    repository.insertFamilyMembers(members)
+                                }
                             } catch (e: Exception) {
                                 Log.e("WorshipViewModel", "Error inserting family members from Firestore: ${e.message}")
                             }
@@ -331,16 +334,25 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     repository.saveSettings(AppSettings())
                 }
 
-                // Seed initial family progress
-                val list = repository.getFamilyMembers().first()
-                if (list.isEmpty()) {
-                    val initialFamily = listOf(
-                        FamilyMember(userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
-                        FamilyMember(userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
-                        FamilyMember(userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
-                        FamilyMember(userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
-                    )
-                    repository.insertFamilyMembers(initialFamily)
+                // Seed initial family progress ONLY if not in a group
+                val hasGroup = existingSettings != null && existingSettings.familyGroupInviteCode.isNotEmpty()
+                if (!hasGroup) {
+                    val list = repository.getFamilyMembers().first()
+                    if (list.isEmpty()) {
+                        val initialFamily = listOf(
+                            FamilyMember(userId = "mock1", name = "أحمد (الأخ)", relation = "الأخ", avatarUrl = "avatar1", progress = 88f, likesCount = 12, likedByMe = false, lastWorship = "صلاة العصر"),
+                            FamilyMember(userId = "mock2", name = "أميرة (الوالدة)", relation = "الأم", avatarUrl = "avatar2", progress = 100f, likesCount = 34, likedByMe = false, lastWorship = "الورد اليومي"),
+                            FamilyMember(userId = "mock3", name = "محمد (الأب)", relation = "الأب", avatarUrl = "avatar3", progress = 77f, likesCount = 9, likedByMe = false, lastWorship = "أذكار الصباح"),
+                            FamilyMember(userId = "mock4", name = "فاطمة (الأخت)", relation = "الأخت", avatarUrl = "avatar4", progress = 55f, likesCount = 15, likedByMe = false, lastWorship = "صلاة الظهر")
+                        )
+                        repository.insertFamilyMembers(initialFamily)
+                    }
+                } else {
+                    // Make sure mock users are completely deleted when there's an active group
+                    repository.deleteFamilyMember("mock1")
+                    repository.deleteFamilyMember("mock2")
+                    repository.deleteFamilyMember("mock3")
+                    repository.deleteFamilyMember("mock4")
                 }
             } catch (e: Exception) {
                 Log.e("WorshipViewModel", "Error in seedInitialDataIfNeeded: ${e.message}")
@@ -792,7 +804,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 familyGroupInviteCode = ""
             )
             repository.saveSettings(updated)
-            repository.insertFamilyMembers(emptyList()) // Clean list when signing out
+            repository.clearFamilyMembers() // Clean list when signing out
             _notificationFlow.emit("تم تسجيل الخروج من حساب Google بنجاح. 👋")
         }
     }
@@ -838,6 +850,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 progress = currentProgress.value.calculatePercentage(),
                 lastWorship = "الآن"
             )
+            repository.clearFamilyMembers()
             repository.insertFamilyMembers(listOf(me))
 
             _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
@@ -904,6 +917,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             if (trimmedCode.isEmpty()) return@launch
 
             _notificationFlow.emit("جاري الانضمام لمجموعة عبر الرمز... ⏳")
+            repository.clearFamilyMembers()
 
             val me = FamilyMember(
                 userId = finalUserId,
@@ -984,7 +998,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 familyGroupInviteCode = ""
             )
             repository.saveSettings(updated)
-            repository.insertFamilyMembers(emptyList()) // clear current family circle members
+            repository.clearFamilyMembers() // clear current family circle members
             try {
                 if (currentSet.isGoogleSignedIn && currentSet.googleUserId.isNotEmpty() && currentSet.googleUserId != "default") {
                     firestore.collection("users").document(currentSet.googleUserId).delete()
