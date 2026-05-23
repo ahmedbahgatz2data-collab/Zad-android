@@ -441,6 +441,27 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
     fun deleteReminder(id: Int) {
         viewModelScope.launch {
             repository.deleteReminder(id)
+            rescheduleAllAlarms()
+        }
+    }
+
+    fun updateReminder(reminder: CustomReminder) {
+        viewModelScope.launch {
+            repository.updateReminder(reminder)
+            rescheduleAllAlarms(true)
+        }
+    }
+
+    fun testNotification() {
+        val application = getApplication<Application>()
+        val intent = android.content.Intent(application, com.example.workers.WorshipReceiver::class.java).apply {
+            putExtra("TITLE", "اختبار التنبيه 🔔")
+            putExtra("MESSAGE", "هذا تنبيه تجريبي للتأكد من عمل النظام بشكل صحيح.")
+            putExtra("ID", 9999)
+        }
+        application.sendBroadcast(intent)
+        viewModelScope.launch {
+            _notificationFlow.emit("تم إرسال تنبيه تجريبي! 📢")
         }
     }
 

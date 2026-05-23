@@ -198,6 +198,7 @@ class WorshipRepository(private val dao: WorshipDao) {
 
     fun getAllReminders(): Flow<List<CustomReminder>> = dao.getAllReminders()
     suspend fun insertReminder(reminder: CustomReminder) = dao.insertReminder(reminder)
+    suspend fun updateReminder(reminder: CustomReminder) = dao.insertReminder(reminder) // REPLACE covers update
     suspend fun deleteReminder(id: Int) = dao.deleteReminder(id)
 
     fun getFamilyMembers(): Flow<List<FamilyMember>> = dao.getFamilyMembers()

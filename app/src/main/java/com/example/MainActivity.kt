@@ -1223,34 +1223,35 @@ fun FamilyScreen(
                                 Toast.makeText(context, "الرجاء الذهاب للوحة Secrets وإضافة GOOGLE_WEB_CLIENT_ID بالـ Web Client ID لتتمكن من التسجيل", Toast.LENGTH_LONG).show()
                                 return@Button
                             }
-                            val credentialManager = CredentialManager.create(context)
-                            val googleIdOption = GetGoogleIdOption.Builder()
+                            val credentialManager = androidx.credentials.CredentialManager.create(context)
+                            val googleIdOption = com.google.android.libraries.identity.googleid.GetGoogleIdOption.Builder()
                                 .setFilterByAuthorizedAccounts(false)
                                 .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                                .setAutoSelectEnabled(false)
                                 .build()
 
-                            val request = GetCredentialRequest.Builder()
+                            val request = androidx.credentials.GetCredentialRequest.Builder()
                                 .addCredentialOption(googleIdOption)
                                 .build()
 
                             coroutineScope.launch {
                                 try {
-                                    val result = credentialManager.getCredential(
-                                        request = request,
-                                        context = context,
+                                    val result = credentialManager.getCredential(context, request)
+                                    val googleIdCredential = com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.createFrom(result.credential.data)
+                                    viewModel.signInWithGoogle(
+                                        id = googleIdCredential.id,
+                                        name = googleIdCredential.displayName ?: "مستخدم زاد",
+                                        email = googleIdCredential.id,
+                                        avatar = googleIdCredential.profilePictureUri?.toString() ?: ""
                                     )
-                                    val credential = result.credential
-                                    if (credential is GoogleIdTokenCredential) {
-                                        viewModel.signInWithGoogle(
-                                            id = credential.id,
-                                            name = credential.displayName ?: "مستخدم زاد",
-                                            email = credential.id,
-                                            avatar = credential.profilePictureUri?.toString() ?: ""
-                                        )
-                                    }
                                 } catch (e: Exception) {
                                     e.printStackTrace()
-                                    Toast.makeText(context, "فشل تسجيل الدخول: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    val errorMsg = when {
+                                        e.message?.contains("10:") == true -> "فشل المطور (10): تأكد من تسجيل الـ SHA-1 للـ App في Firebase/Google Console."
+                                        e.message?.contains("7:") == true -> "فشل الشبكة (7): تأكد من اتصال هاتفك بالإنترنت للمتابعة."
+                                        else -> "فشل تسجيل الدخول: ${e.localizedMessage}"
+                                    }
+                                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                                 }
                             }
                         },
@@ -1266,7 +1267,6 @@ fun FamilyScreen(
                             .testTag("google_signin_button")
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Custom high-fidelity Google G Vector Letter Draw
                             Text(
                                 text = "G ", 
                                 style = MaterialTheme.typography.titleMedium, 
@@ -1279,6 +1279,23 @@ fun FamilyScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Mock Sign-In for development
+                    TextButton(
+                        onClick = {
+                            viewModel.signInWithGoogle(
+                                id = "mock_user_123",
+                                name = "مستخدم تجريبي (زاد)",
+                                email = "test@example.com",
+                                avatar = ""
+                            )
+                        },
+                        modifier = Modifier.testTag("mock_signin_button")
+                    ) {
+                        Text("تجربة التطبيق بدون حساب (للمطورين)", color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
                     }
                 }
             }
@@ -1558,7 +1575,6 @@ fun FamilyScreen(
         // Removed Add Member dialog, handled by invite code.
     }
 }
-
 @Composable
 fun FamilyMemberItemCard(
     member: FamilyMember,
@@ -2205,6 +2221,7 @@ fun SettingsScreen(
     }
 
     var showAddReminderDialog by remember { mutableStateOf(false) }
+    var editingReminder by remember { mutableStateOf<CustomReminder?>(null) }
 
     // Forms for setting inputs
     var reminderTitle by remember { mutableStateOf("") }
@@ -2435,13 +2452,21 @@ fun SettingsScreen(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.testTag("add_reminder_btn")
                         ) {
-                            Text("إضافة تذكير", fontSize = 11.sp, maxLines = 1)
+                            Text("إضافة", fontSize = 11.sp, maxLines = 1)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.testNotification() },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("test_notif_btn")
+                        ) {
+                            Text("تجربة التنبيه", fontSize = 11.sp, maxLines = 1)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "ضبط أوقات إضافية للتنبيه بالأوراد، قيام الليل، السنن الرواتب، أو صيام التطوع مع تكرار مرن:",
+                        text = "ضبط أوقات إضافية للتنبيه بالأوراد أو قيام الليل مع تكرار مرن. يمكنك تجربة عمل التنبيهات من الزر أعلاه:",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray,
                         lineHeight = 16.sp
@@ -2463,7 +2488,14 @@ fun SettingsScreen(
                                 ReminderItemRow(
                                     reminder = r,
                                     onToggle = { viewModel.toggleReminder(r) },
-                                    onDelete = { viewModel.deleteReminder(r.id) }
+                                    onDelete = { viewModel.deleteReminder(r.id) },
+                                    onEdit = {
+                                        reminderTitle = r.title
+                                        reminderHour = r.hour
+                                        reminderMinute = r.minute
+                                        reminderSound = r.soundUri
+                                        editingReminder = r
+                                    }
                                 )
                             }
                         }
@@ -2712,36 +2744,59 @@ fun SettingsScreen(
         item { Spacer(modifier = Modifier.height(40.dp)) }
     }
 
-    // New Custom Reminder Dialog
-    if (showAddReminderDialog) {
+    // New/Edit Custom Reminder Dialog
+    if (showAddReminderDialog || editingReminder != null) {
+        val isEdit = editingReminder != null
         AlertDialog(
-            onDismissRequest = { showAddReminderDialog = false },
+            onDismissRequest = { 
+                showAddReminderDialog = false 
+                editingReminder = null
+                reminderTitle = ""
+                reminderSound = "الافتراضي"
+            },
             confirmButton = {
                 Button(
                     onClick = {
                         if (reminderTitle.isNotBlank()) {
-                            viewModel.addReminder(
-                                title = reminderTitle,
-                                hour = reminderHour,
-                                minute = reminderMinute,
-                                days = "يومي",
-                                sound = reminderSound
-                            )
+                            if (isEdit) {
+                                editingReminder?.let {
+                                    viewModel.updateReminder(it.copy(
+                                        title = reminderTitle,
+                                        hour = reminderHour,
+                                        minute = reminderMinute,
+                                        soundUri = reminderSound
+                                    ))
+                                }
+                            } else {
+                                viewModel.addReminder(
+                                    title = reminderTitle,
+                                    hour = reminderHour,
+                                    minute = reminderMinute,
+                                    days = "يومي",
+                                    sound = reminderSound
+                                )
+                            }
                             showAddReminderDialog = false
+                            editingReminder = null
                             reminderTitle = ""
                             reminderSound = "الافتراضي"
                         }
                     }
                 ) {
-                    Text("إضافة")
+                    Text(if (isEdit) "تحديث" else "إضافة")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddReminderDialog = false }) {
+                TextButton(onClick = { 
+                    showAddReminderDialog = false 
+                    editingReminder = null
+                    reminderTitle = ""
+                    reminderSound = "الافتراضي"
+                }) {
                     Text("إلغاء")
                 }
             },
-            title = { Text("إضافة تنبيه مخصص جديد", fontWeight = FontWeight.Bold) },
+            title = { Text(if (isEdit) "تعديل التنبيه" else "إضافة تنبيه مخصص جديد", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
                     OutlinedTextField(
@@ -2811,7 +2866,8 @@ fun SettingsScreen(
 fun ReminderItemRow(
     reminder: CustomReminder,
     onToggle: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onEdit: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2844,7 +2900,7 @@ fun ReminderItemRow(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = String.format(Locale.US, "%02d:%02d (%s) - %s", reminder.hour, reminder.minute, reminder.repeatDays, reminder.soundUri),
+                        text = String.format(Locale.US, "%02d:%02d (%s)", reminder.hour, reminder.minute, reminder.repeatDays),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
                     )
@@ -2852,6 +2908,17 @@ fun ReminderItemRow(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.testTag("edit_rem_${reminder.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "تعديل التنبيه",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 Switch(
                     checked = reminder.isEnabled,
                     onCheckedChange = { onToggle() },
@@ -2860,7 +2927,7 @@ fun ReminderItemRow(
                     ),
                     modifier = Modifier.testTag("toggle_rem_${reminder.id}")
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 IconButton(
                     onClick = onDelete,
                     modifier = Modifier.testTag("delete_rem_${reminder.id}")
@@ -3110,9 +3177,13 @@ fun AppWideWelcomeLoginScreen(
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        Toast.makeText(context, "فشل تسجيل الدخول: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                        // Fallback to mock for testing in environment if needed? 
-                        // No, user asked for real.
+                        val errorMsg = when {
+                            e.message?.contains("10:") == true -> "فشل المطور (10): تأكد من تسجيل الـ SHA-1 للـ App في Firebase/Google Console."
+                            e.message?.contains("7:") == true -> "فشل الشبكة (7): تأكد من اتصال هاتفك بالإنترنت للمتابعة."
+                            e.message?.contains("invalid_credential") == true -> "بيانات اعتماد غير صالحة. الرجاء إعادة المحاولة."
+                            else -> "فشل تسجيل الدخول: ${e.localizedMessage}"
+                        }
+                        Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                     }
                 }
             },
