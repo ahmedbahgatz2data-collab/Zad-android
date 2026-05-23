@@ -1,5 +1,12 @@
 package com.example
 
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import kotlin.math.*
+
 import android.os.Bundle
 import android.widget.Toast
 import android.Manifest
@@ -10,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -603,6 +611,7 @@ fun TodayScreen(
 ) {
     val percentage = progress.calculatePercentage()
     val isDark = settings.isDarkMode
+    var selectedCategory by remember { mutableStateOf("الجميع") }
 
     LazyColumn(
         modifier = Modifier
@@ -660,207 +669,221 @@ fun TodayScreen(
 
         // Category Selection Filters
         item {
-            CategoryFiltersRow(isDark = isDark)
+            CategoryFiltersRow(
+                selected = selectedCategory,
+                onCategorySelected = { selectedCategory = it },
+                isDark = isDark
+            )
         }
 
-        // Adhkar Section Header
-        item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(text = "☀️", fontSize = 20.sp)
+        if (selectedCategory == "الجميع" || selectedCategory == "الأذكار") {
+            // Adhkar Section Header
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(text = "☀️", fontSize = 20.sp)
+                    Text(
+                        text = "الأذكار اليومية",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color(0xFF00C896) else Color(0xFF047857)
+                    )
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    AdhkarCard(
+                        title = "أذكار الصباح",
+                        subtitle = "انقر للقراءة",
+                        isChecked = progress.adhkarMorning,
+                        icon = Icons.Default.WbSunny,
+                        modifier = Modifier.weight(1f),
+                        isDark = isDark,
+                        onCheckedChange = { viewModel.toggleAdhkarMorning() }
+                    )
+                    AdhkarCard(
+                        title = "أذكار المساء",
+                        subtitle = "انقر للقراءة",
+                        isChecked = progress.adhkarEvening,
+                        icon = Icons.Default.NightlightRound,
+                        modifier = Modifier.weight(1f),
+                        isDark = isDark,
+                        onCheckedChange = { viewModel.toggleAdhkarEvening() }
+                    )
+                }
+            }
+        }
+
+        if (selectedCategory == "الجميع") {
+            // Qibla Card
+            item {
+                QiblaCompactCard(settings = settings, isDark = isDark)
+            }
+        }
+
+        if (selectedCategory == "الجميع" || selectedCategory == "السنن") {
+            item {
                 Text(
-                    text = "الأذكار اليومية",
+                    text = "الصلوات المفروضة والسنن:",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (isDark) Color(0xFF00C896) else Color(0xFF047857)
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                )
+            }
+
+            item {
+                WorshipCheckItem(
+                    title = "صلاة الفجر في وقتها",
+                    isChecked = progress.fajr,
+                    onCheckedChange = { viewModel.toggleFajr() },
+                    icon = "🕌"
+                )
+            }
+            item {
+                WorshipCheckItem(
+                    title = "صلاة الظهر في وقتها",
+                    isChecked = progress.dhuhr,
+                    onCheckedChange = { viewModel.toggleDhuhr() },
+                    icon = "🕌"
+                )
+            }
+            item {
+                WorshipCheckItem(
+                    title = "صلاة العصر في وقتها",
+                    isChecked = progress.asr,
+                    onCheckedChange = { viewModel.toggleAsr() },
+                    icon = "🕌"
+                )
+            }
+            item {
+                WorshipCheckItem(
+                    title = "صلاة المغرب في وقتها",
+                    isChecked = progress.maghrib,
+                    onCheckedChange = { viewModel.toggleMaghrib() },
+                    icon = "🕌"
+                )
+            }
+            item {
+                WorshipCheckItem(
+                    title = "صلاة العشاء في وقتها",
+                    isChecked = progress.isha,
+                    onCheckedChange = { viewModel.toggleIsha() },
+                    icon = "🕌"
                 )
             }
         }
 
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                AdhkarCard(
-                    title = "أذكار الصباح",
-                    subtitle = "انقر للقراءة",
-                    isChecked = progress.adhkarMorning,
-                    icon = Icons.Default.WbSunny,
-                    modifier = Modifier.weight(1f),
-                    isDark = isDark,
-                    onCheckedChange = { viewModel.toggleAdhkarMorning() }
-                )
-                AdhkarCard(
-                    title = "أذكار المساء",
-                    subtitle = "انقر للقراءة",
-                    isChecked = progress.adhkarEvening,
-                    icon = Icons.Default.NightlightRound,
-                    modifier = Modifier.weight(1f),
-                    isDark = isDark,
-                    onCheckedChange = { viewModel.toggleAdhkarEvening() }
+        if (selectedCategory == "الجميع" || selectedCategory == "القرآن") {
+            item {
+                WorshipCheckItem(
+                    title = "الورد القرآني (قراءة كافية)",
+                    isChecked = progress.quranRead,
+                    onCheckedChange = { viewModel.toggleQuranRead() },
+                    icon = "📖"
                 )
             }
         }
 
-        // Qibla Card
-        item {
-            QiblaCompactCard(isDark = isDark)
-        }
+        if (selectedCategory == "الجميع" || selectedCategory == "السنن") {
+            // Detailed Sunnah Segmented card
+            item {
+                var isExpanded by remember { mutableStateOf(false) }
+                val completedSunnahs = listOf(
+                    progress.sunnahFajr, progress.sunnahDuha, progress.sunnahDhuhrQabli,
+                    progress.sunnahDhuhrBadi, progress.sunnahMaghrib, progress.sunnahIsha, progress.sunnahQiyam
+                ).count { it }
 
-        item {
-            Text(
-                text = "الصلوات المفروضة والسنن:",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-            )
-        }
-
-        item {
-            WorshipCheckItem(
-                title = "صلاة الفجر في وقتها",
-                isChecked = progress.fajr,
-                onCheckedChange = { viewModel.toggleFajr() },
-                icon = "🕌"
-            )
-        }
-        item {
-            WorshipCheckItem(
-                title = "صلاة الظهر في وقتها",
-                isChecked = progress.dhuhr,
-                onCheckedChange = { viewModel.toggleDhuhr() },
-                icon = "🕌"
-            )
-        }
-        item {
-            WorshipCheckItem(
-                title = "صلاة العصر في وقتها",
-                isChecked = progress.asr,
-                onCheckedChange = { viewModel.toggleAsr() },
-                icon = "🕌"
-            )
-        }
-        item {
-            WorshipCheckItem(
-                title = "صلاة المغرب في وقتها",
-                isChecked = progress.maghrib,
-                onCheckedChange = { viewModel.toggleMaghrib() },
-                icon = "🕌"
-            )
-        }
-        item {
-            WorshipCheckItem(
-                title = "صلاة العشاء في وقتها",
-                isChecked = progress.isha,
-                onCheckedChange = { viewModel.toggleIsha() },
-                icon = "🕌"
-            )
-        }
-
-        item {
-            WorshipCheckItem(
-                title = "الورد القرآني (قراءة كافية)",
-                isChecked = progress.quranRead,
-                onCheckedChange = { viewModel.toggleQuranRead() },
-                icon = "📖"
-            )
-        }
-
-        // Detailed Sunnah Segmented card
-        item {
-            var isExpanded by remember { mutableStateOf(false) }
-            val completedSunnahs = listOf(
-                progress.sunnahFajr, progress.sunnahDuha, progress.sunnahDhuhrQabli,
-                progress.sunnahDhuhrBadi, progress.sunnahMaghrib, progress.sunnahIsha, progress.sunnahQiyam
-            ).count { it }
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isDark) {
-                        if (progress.sunnahPrayed || completedSunnahs > 0) Color(0xFF10B981).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.05f)
-                    } else {
-                        if (progress.sunnahPrayed || completedSunnahs > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-                    }
-                ),
-                border = if (isDark) {
-                    BorderStroke(1.dp, if (progress.sunnahPrayed || completedSunnahs > 0) Color(0xFF10B981).copy(alpha = 0.3f) else Color.White.copy(alpha = 0.1f))
-                } else null,
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-            ) {
-                Column {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isExpanded = !isExpanded }
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "✨", fontSize = 24.sp)
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "النوافل وسنن الرواتب الصلاة",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = if (completedSunnahs > 0) "تم إنجاز $completedSunnahs من ٧ سنن اليوم! 🎉" else "اضغط لتفصيل ركعات وسنن اليوم تالياً 👇",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
-                            )
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isDark) {
+                            if (progress.sunnahPrayed || completedSunnahs > 0) Color(0xFF10B981).copy(alpha = 0.08f) else Color.White.copy(alpha = 0.05f)
+                        } else {
+                            if (progress.sunnahPrayed || completedSunnahs > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
                         }
-                        IconButton(onClick = { isExpanded = !isExpanded }) {
-                            Icon(
-                                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = "عرض السنن",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    if (isExpanded) {
-                        HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.3f))
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ),
+                    border = if (isDark) {
+                        BorderStroke(1.dp, if (progress.sunnahPrayed || completedSunnahs > 0) Color(0xFF10B981).copy(alpha = 0.3f) else Color.White.copy(alpha = 0.1f))
+                    } else null,
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isExpanded = !isExpanded }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val sunnahsList = listOf(
-                                SunnahBundle("ركعتا الفجر القبلية", progress.sunnahFajr, { viewModel.toggleSunnahFajr() }, "🌅"),
-                                SunnahBundle("سنة الضحى المباركة", progress.sunnahDuha, { viewModel.toggleSunnahDuha() }, "☀️"),
-                                SunnahBundle("سنة الظهر القبلية (٤ ركعات)", progress.sunnahDhuhrQabli, { viewModel.toggleSunnahDhuhrQabli() }, "🌤️"),
-                                SunnahBundle("سنة الظهر البعدية (ركعتان)", progress.sunnahDhuhrBadi, { viewModel.toggleSunnahDhuhrBadi() }, "🌤️"),
-                                SunnahBundle("سنة المغرب البعدية (ركعتان)", progress.sunnahMaghrib, { viewModel.toggleSunnahMaghrib() }, "🌇"),
-                                SunnahBundle("سنة العشاء البعدية (ركعتان)", progress.sunnahIsha, { viewModel.toggleSunnahIsha() }, "🌌"),
-                                SunnahBundle("قيام الليل والسر والوتر", progress.sunnahQiyam, { viewModel.toggleSunnahQiyam() }, "✨")
-                            )
+                            Text(text = "✨", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "النوافل وسنن الرواتب الصلاة",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = if (completedSunnahs > 0) "تم إنجاز $completedSunnahs من ٧ سنن اليوم! 🎉" else "اضغط لتفصيل ركعات وسنن اليوم تالياً 👇",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.Gray
+                                )
+                            }
+                            IconButton(onClick = { isExpanded = !isExpanded }) {
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "عرض السنن",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
 
-                            sunnahsList.forEach { s ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { s.onToggle() }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(s.emoji, fontSize = 16.sp)
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(s.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                        if (isExpanded) {
+                            HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.3f))
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val sunnahsList = listOf(
+                                    SunnahBundle("ركعتا الفجر القبلية", progress.sunnahFajr, { viewModel.toggleSunnahFajr() }, "🌅"),
+                                    SunnahBundle("سنة الضحى المباركة", progress.sunnahDuha, { viewModel.toggleSunnahDuha() }, "☀️"),
+                                    SunnahBundle("سنة الظهر القبلية (٤ ركعات)", progress.sunnahDhuhrQabli, { viewModel.toggleSunnahDhuhrQabli() }, "🌤️"),
+                                    SunnahBundle("سنة الظهر البعدية (ركعتان)", progress.sunnahDhuhrBadi, { viewModel.toggleSunnahDhuhrBadi() }, "🌤️"),
+                                    SunnahBundle("سنة المغرب البعدية (ركعتان)", progress.sunnahMaghrib, { viewModel.toggleSunnahMaghrib() }, "🌇"),
+                                    SunnahBundle("سنة العشاء البعدية (ركعتان)", progress.sunnahIsha, { viewModel.toggleSunnahIsha() }, "🌌"),
+                                    SunnahBundle("قيام الليل والسر والوتر", progress.sunnahQiyam, { viewModel.toggleSunnahQiyam() }, "✨")
+                                )
+
+                                sunnahsList.forEach { s ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { s.onToggle() }
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(s.emoji, fontSize = 16.sp)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(s.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                        Checkbox(
+                                            checked = s.isChecked,
+                                            onCheckedChange = { s.onToggle() },
+                                            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                                        )
                                     }
-                                    Checkbox(
-                                        checked = s.isChecked,
-                                        onCheckedChange = { s.onToggle() },
-                                        colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
-                                    )
                                 }
                             }
                         }
@@ -869,10 +892,11 @@ fun TodayScreen(
             }
         }
 
-        // Prophetic Supplications Reference Library Card
-        item {
-            Text(
-                text = "مكتبة الأدعية والأورداد النبوية المأثورة 🕌:",
+        if (selectedCategory == "الجميع" || selectedCategory == "الأذكار") {
+            // Prophetic Supplications Reference Library Card
+            item {
+                Text(
+                    text = "مكتبة الأدعية والأورداد النبوية المأثورة 🕌:",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -938,6 +962,7 @@ fun TodayScreen(
                     }
                 }
             }
+        }
         }
 
         item {
@@ -2620,53 +2645,53 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(24.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "🔔 بوابة إدارة التنبيهات والأذكار المخصصة",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "ضبط أوقات إضافية للتنبيه بالأوراد أو قيام الليل مع تكرار مرن. يمكنك تجربة عمل التنبيهات من الأزرار تالياً:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        lineHeight = 16.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "🔔 بوابة إدارة التنبيهات والأذكار المخصصة",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = { showAddReminderDialog = true },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary
                             ),
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("add_reminder_btn")
+                            modifier = Modifier.weight(1f).testTag("add_reminder_btn")
                         ) {
-                            Text("إضافة", fontSize = 11.sp, maxLines = 1)
+                            Text("إضافة +", fontSize = 10.sp, maxLines = 1)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
                         OutlinedButton(
                             onClick = { viewModel.testNotification() },
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("test_notif_btn")
+                            modifier = Modifier.weight(1.2f).testTag("test_notif_btn")
                         ) {
-                            Text("تجربة التنبيه", fontSize = 11.sp, maxLines = 1)
+                            Text("تجربة التنبيه 🔔", fontSize = 10.sp, maxLines = 1)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
                         OutlinedButton(
                             onClick = { viewModel.unlockAudioAndPlayPreview() },
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("test_adhan_btn")
+                            modifier = Modifier.weight(1.2f).testTag("test_adhan_btn")
                         ) {
-                            Text("تجربة الأذان", fontSize = 11.sp, maxLines = 1)
+                            Text("تجربة الأذان 🔊", fontSize = 10.sp, maxLines = 1)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "ضبط أوقات إضافية للتنبيه بالأوراد أو قيام الليل مع تكرار مرن. يمكنك تجربة عمل التنبيهات من الزر أعلاه:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray,
-                        lineHeight = 16.sp
-                    )
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (reminders.isEmpty()) {
@@ -3697,9 +3722,8 @@ fun LoginSyncPromotionCard(isDark: Boolean, onLoginClick: () -> Unit) {
 }
 
 @Composable
-fun CategoryFiltersRow(isDark: Boolean) {
+fun CategoryFiltersRow(selected: String, onCategorySelected: (String) -> Unit, isDark: Boolean) {
     val categories = listOf("الجميع", "الأذكار", "السنن", "القرآن")
-    var selected by remember { mutableStateOf("الجميع") }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3717,7 +3741,7 @@ fun CategoryFiltersRow(isDark: Boolean) {
                         if (isSelected) Color.Transparent else (if (isDark) Color(0xFF00C896).copy(alpha = 0.2f) else Color(0xFFE2E8F0)),
                         RoundedCornerShape(16.dp)
                     )
-                    .clickable { selected = cat }
+                    .clickable { onCategorySelected(cat) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -3733,7 +3757,69 @@ fun CategoryFiltersRow(isDark: Boolean) {
 }
 
 @Composable
-fun QiblaCompactCard(isDark: Boolean) {
+fun QiblaCompactCard(settings: AppSettings, isDark: Boolean) {
+    val context = LocalContext.current
+    var azimuth by remember { mutableStateOf(0f) }
+
+    DisposableEffect(Unit) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        
+        val sensorEventListener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                try {
+                    if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                        if (event.values.size >= 3) {
+                            val rotationMatrix = FloatArray(9)
+                            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                            val orientationAngles = FloatArray(3)
+                            SensorManager.getOrientation(rotationMatrix, orientationAngles)
+                            var currentAzimuth = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
+                            if (currentAzimuth.isNaN()) currentAzimuth = 0f
+                            if (currentAzimuth < 0) currentAzimuth += 360f
+                            azimuth = currentAzimuth
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        
+        if (rotationSensor != null) {
+            sensorManager?.registerListener(sensorEventListener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
+        }
+        
+        onDispose {
+            sensorManager?.unregisterListener(sensorEventListener)
+        }
+    }
+
+    // Calculate Qibla Bearing manually
+    val userLat = Math.toRadians(settings.latitude)
+    val userLon = Math.toRadians(settings.longitude)
+    val meccaLat = Math.toRadians(21.422487)
+    val meccaLon = Math.toRadians(39.826206)
+
+    val dLon = meccaLon - userLon
+    val y = sin(dLon) * cos(meccaLat)
+    val x = cos(userLat) * sin(meccaLat) - sin(userLat) * cos(meccaLat) * cos(dLon)
+    var qiblaBearing = Math.toDegrees(atan2(y, x)).toFloat()
+    if (qiblaBearing.isNaN()) qiblaBearing = 0f
+    if (qiblaBearing < 0) qiblaBearing += 360f
+
+    // Calculate the difference so the compass points to Qibla
+    var targetRotation = qiblaBearing - azimuth
+    if (targetRotation.isNaN()) targetRotation = 0f
+    if (targetRotation < 0) targetRotation += 360f
+
+    val animatedRotation by animateFloatAsState(
+        targetValue = targetRotation,
+        animationSpec = tween(durationMillis = 300),
+        label = "compassRotation"
+    )
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -3744,7 +3830,7 @@ fun QiblaCompactCard(isDark: Boolean) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text(text = "اتجاه القبلة", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
-                    Text(text = "بوصلة تفاعلية حقيقية", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+                    Text(text = "بوصلة تفاعلية حقيقية مرتبطة بموقعك: ${settings.locationName}", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
                 }
                 Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(if (isDark) Color(0xFF00C896).copy(alpha = 0.1f) else Color(0xFFECFDF5)), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Explore, contentDescription = null, tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857), modifier = Modifier.size(14.dp))
@@ -3752,42 +3838,29 @@ fun QiblaCompactCard(isDark: Boolean) {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CompactCompass(isDark = isDark)
+                Box(modifier = Modifier.size(150.dp), contentAlignment = Alignment.Center) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val center = Offset(size.width / 2, size.height / 2)
+                        val radius = size.minDimension / 2
+                        
+                        // Outer Circle
+                        drawCircle(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.2f), radius = radius, style = Stroke(width = 1.dp.toPx()))
+                    }
+                    
+                    Icon(
+                        imageVector = Icons.Default.Explore, 
+                        contentDescription = null, 
+                        tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857),
+                        modifier = Modifier.size(120.dp).graphicsLayer(rotationZ = animatedRotation)
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
             Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "138°", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
-                Text(text = "من الشمال", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
-                Text(text = "وجه الهاتف للجهة الخضراء بدقة", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+                Text(text = "${qiblaBearing.toInt()}°", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
+                Text(text = "زاوية انحراف القبلة من الشمال الجغرافي", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
+                Text(text = "وجه الهاتف لتصل للجهة الخضراء بدقة", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, color = Color.Gray)
             }
         }
-    }
-}
-
-@Composable
-fun CompactCompass(isDark: Boolean) {
-    Box(modifier = Modifier.size(150.dp), contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val center = Offset(size.width / 2, size.height / 2)
-            val radius = size.minDimension / 2
-            
-            // Outer Circle
-            drawCircle(color = if (isDark) Color.White.copy(alpha = 0.05f) else Color.LightGray.copy(alpha = 0.2f), radius = radius, style = Stroke(width = 1.dp.toPx()))
-            
-            // Cardinal Points
-            val points = listOf("N", "E", "S", "W")
-            val angles = listOf(270f, 0f, 90f, 180f)
-            // Note: AR is RTL, but for Compass N is N. Actually let's use the provided screenshot's labels if possible.
-            // Screenshot has: W, N, E, S. Wait.
-            // North is at top? No, in screenshot, N is at right, E at bottom, S at left, W at top. This looks like it's rotated.
-        }
-        
-        // Simple rotated image or shape for compass
-        Icon(
-            imageVector = Icons.Default.Explore, 
-            contentDescription = null, 
-            tint = if (isDark) Color(0xFF00C896) else Color(0xFF047857),
-            modifier = Modifier.size(120.dp).graphicsLayer(rotationZ = 138f)
-        )
     }
 }
