@@ -908,6 +908,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
             _notificationFlow.emit("جاري إنشاء المجموعة العائلية... ⏳")
 
+            // Prioritize enabling Firestore network in case it is sleeping or offline
+            try {
+                firestore.enableNetwork().await()
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Failed to enable network: ${e.message}")
+            }
+
             // Generates unique code and checks if it exists in Firestore, up to 3 attempts
             val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
             var inviteCode = ""
@@ -1022,16 +1029,49 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             _notificationFlow.emit("جاري البحث عن المجموعة والانضمام... ⏳")
 
             try {
-                // Verify if group exists in Firestore
-                val groupDoc = try {
-                    firestore.collection("groups").document(trimmedCode).get().await()
-                } catch (e: Exception) {
-                    val msg = e.message ?: ""
+                // Explicitly enable network first to make sure Firestore is awake
+                try {
+                    firestore.enableNetwork().await()
+                } catch (ne: Exception) {
+                    Log.e("WorshipViewModel", "enableNetwork failed: ${ne.message}")
+                }
+
+                var groupDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+                var lastError: Exception? = null
+
+                // Try fetching the document up to 4 times with moderate delays
+                for (attempt in 1..4) {
+                    try {
+                        groupDoc = firestore.collection("groups").document(trimmedCode).get().await()
+                        if (groupDoc != null) {
+                            lastError = null
+                            break
+                        }
+                    } catch (e: Exception) {
+                        lastError = e
+                        val msg = e.message ?: ""
+                        Log.w("WorshipViewModel", "Get group doc attempt $attempt failed: $msg")
+                        if (msg.contains("offline", ignoreCase = true) || 
+                            msg.contains("network", ignoreCase = true) || 
+                            msg.contains("unavailable", ignoreCase = true) ||
+                            msg.contains("channel", ignoreCase = true)) {
+                            if (attempt < 4) {
+                                kotlinx.coroutines.delay(1000L * attempt) // Exponential delay
+                            }
+                        } else {
+                            // Non-network exceptions (like permission denied) should be thrown immediately
+                            throw e
+                        }
+                    }
+                }
+
+                if (lastError != null) {
+                    val msg = lastError.message ?: ""
                     if (msg.contains("offline", ignoreCase = true) || msg.contains("network", ignoreCase = true) || msg.contains("unavailable", ignoreCase = true)) {
                         _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
                         return@launch
                     } else {
-                        throw e
+                        throw lastError
                     }
                 }
 
