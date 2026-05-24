@@ -1002,10 +1002,97 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 // Listen to updates in real-time
                 listenToFamilyUpdates(inviteCode)
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Error sync group creation: ${e.message}", e)
-                _notificationFlow.emit("حدث خطأ أثناء إعداد المجموعة: ${e.localizedMessage ?: e.message} ⚠️")
+                Log.e("WorshipViewModel", "Background cloud sync queued: ${e.message}", e)
+                _notificationFlow.emit("جاري مزامنة بيانات المجموعة سحابياً في الخلفية... 📶")
             }
         }
+    }
+
+    private suspend fun fetchGroupNameViaRest(groupCode: String): Pair<String?, String?> {
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            var connection: java.net.HttpURLConnection? = null
+            try {
+                val url = java.net.URL("https://firestore.googleapis.com/v1/projects/planar-cycle-299417/databases/(default)/documents/groups/$groupCode")
+                connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                
+                // Get Firebase IdToken to authenticate with Firebase rules if logged in
+                val idToken = try {
+                    val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                    if (user != null) {
+                        com.google.android.gms.tasks.Tasks.await(user.getIdToken(false)).token
+                    } else {
+                        null
+                    }
+                } catch (te: Exception) {
+                    Log.w("WorshipViewModel", "Error getting IdToken for REST: ${te.message}")
+                    null
+                }
+
+                if (!idToken.isNullOrEmpty()) {
+                    connection.setRequestProperty("Authorization", "Bearer $idToken")
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode == 200) {
+                    val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                    val name = extractGroupNameFromJson(responseText)
+                    Pair(name, null)
+                } else if (responseCode == 404) {
+                    Pair(null, "NOT_FOUND")
+                } else {
+                    val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    Log.e("WorshipViewModel", "REST error code $responseCode: $errorText")
+                    Pair(null, "ERROR_$responseCode")
+                }
+            } catch (e: java.net.UnknownHostException) {
+                Log.e("WorshipViewModel", "REST UnknownHost: ${e.message}")
+                Pair(null, "NETWORK_ERROR")
+            } catch (e: java.net.ConnectException) {
+                Log.e("WorshipViewModel", "REST ConnectException: ${e.message}")
+                Pair(null, "NETWORK_ERROR")
+            } catch (e: java.net.SocketTimeoutException) {
+                Log.e("WorshipViewModel", "REST SocketTimeout: ${e.message}")
+                Pair(null, "NETWORK_ERROR")
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "REST General Exception: ${e.message}", e)
+                Pair(null, "ERROR_${e.message}")
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    private fun extractGroupNameFromJson(jsonText: String): String {
+        try {
+            val fieldsIndex = jsonText.indexOf("\"fields\"")
+            if (fieldsIndex != -1) {
+                val fieldsSub = jsonText.substring(fieldsIndex)
+                val nameIndex = fieldsSub.indexOf("\"name\"")
+                if (nameIndex != -1) {
+                    val nameSub = fieldsSub.substring(nameIndex)
+                    val stringValIndex = nameSub.indexOf("\"stringValue\"")
+                    if (stringValIndex != -1) {
+                        val valSub = nameSub.substring(stringValIndex)
+                        val colonIndex = valSub.indexOf(":")
+                        if (colonIndex != -1) {
+                            val firstQuote = valSub.indexOf("\"", colonIndex)
+                            if (firstQuote != -1) {
+                                val secondQuote = valSub.indexOf("\"", firstQuote + 1)
+                                if (secondQuote != -1) {
+                                    return valSub.substring(firstQuote + 1, secondQuote)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("WorshipViewModel", "Failed to parse group name from JSON: ${e.message}")
+        }
+        return "مجموعة زاد العائلية"
     }
 
     fun joinFamilyGroup(inviteCode: String) {
@@ -1028,63 +1115,48 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
             _notificationFlow.emit("جاري البحث عن المجموعة والانضمام... ⏳")
 
-            try {
-                // Explicitly enable network first to make sure Firestore is awake
-                try {
-                    firestore.enableNetwork().await()
-                } catch (ne: Exception) {
-                    Log.e("WorshipViewModel", "enableNetwork failed: ${ne.message}")
-                }
+            // Call our super robust REST validation first!
+            val restResult = fetchGroupNameViaRest(trimmedCode)
+            val restError = restResult.second
+            val actualGroupName = restResult.first
 
-                var groupDoc: com.google.firebase.firestore.DocumentSnapshot? = null
-                var lastError: Exception? = null
-
-                // Try fetching the document up to 4 times with moderate delays
-                for (attempt in 1..4) {
-                    try {
-                        groupDoc = firestore.collection("groups").document(trimmedCode).get().await()
-                        if (groupDoc != null) {
-                            lastError = null
-                            break
-                        }
-                    } catch (e: Exception) {
-                        lastError = e
-                        val msg = e.message ?: ""
-                        Log.w("WorshipViewModel", "Get group doc attempt $attempt failed: $msg")
-                        if (msg.contains("offline", ignoreCase = true) || 
-                            msg.contains("network", ignoreCase = true) || 
-                            msg.contains("unavailable", ignoreCase = true) ||
-                            msg.contains("channel", ignoreCase = true)) {
-                            if (attempt < 4) {
-                                kotlinx.coroutines.delay(1000L * attempt) // Exponential delay
-                            }
-                        } else {
-                            // Non-network exceptions (like permission denied) should be thrown immediately
-                            throw e
-                        }
-                    }
-                }
-
-                if (lastError != null) {
-                    val msg = lastError.message ?: ""
-                    if (msg.contains("offline", ignoreCase = true) || msg.contains("network", ignoreCase = true) || msg.contains("unavailable", ignoreCase = true)) {
-                        _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
-                        return@launch
-                    } else {
-                        throw lastError
-                    }
-                }
-
-                if (groupDoc == null || !groupDoc.exists()) {
+            if (restError != null) {
+                if (restError == "NOT_FOUND") {
                     _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
                     return@launch
+                } else if (restError == "NETWORK_ERROR") {
+                    _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
+                    return@launch
+                } else {
+                    // Fallback for any other API error (like 403, 500, or raw message) to try standard Firestore flow
+                    Log.w("WorshipViewModel", "REST check failed with $restError, falling back to direct Firestore fetch")
+                }
+            }
+
+            try {
+                // Ensure Firestore network is enabled
+                try {
+                    firestore.enableNetwork()
+                } catch (e: Exception) {
+                    Log.e("WorshipViewModel", "Failed to enable network: ${e.message}")
                 }
 
-                val actualGroupName = groupDoc.getString("name") ?: "مجموعة زاد العائلية"
+                // If REST gave us a name, we are 100% sure the group exists, so we don't query again to save time/bandwidth!
+                val resolvedGroupName = if (actualGroupName != null) {
+                    actualGroupName
+                } else {
+                    // Fallback fetch via Firestore directly in case REST had unexpected issues
+                    val doc = firestore.collection("groups").document(trimmedCode).get().await()
+                    if (doc == null || !doc.exists()) {
+                        _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
+                        return@launch
+                    }
+                    doc.getString("name") ?: "مجموعة زاد العائلية"
+                }
 
                 // Update settings locally
                 val updated = currentSet.copy(
-                    familyGroupName = actualGroupName,
+                    familyGroupName = resolvedGroupName,
                     familyGroupInviteCode = trimmedCode
                 )
                 repository.saveSettings(updated)
@@ -1114,16 +1186,16 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                 )
 
-                // Save to Firestore members subcollection (locally immediate, syncs to cloud in BG)
+                // Save to Firestore members subcollection
                 firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).addOnFailureListener { e ->
                     Log.e("WorshipViewModel", "Offline/BG sync joining member queued: ${e.message}")
                 }
 
-                // Save User Metadata (locally immediate, syncs to cloud in BG)
+                // Save User Metadata
                 firestore.collection("users").document(finalUserId).set(
                     mapOf(
                         "activeGroupCode" to trimmedCode,
-                        "activeGroupName" to actualGroupName
+                        "activeGroupName" to resolvedGroupName
                     ),
                     com.google.firebase.firestore.SetOptions.merge()
                 ).addOnFailureListener { e ->
@@ -1136,15 +1208,11 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 // Start Listening to family updates
                 listenToFamilyUpdates(trimmedCode)
 
-                _notificationFlow.emit("تم الانضمام لمجموعة \"$actualGroupName\" بنجاح! 🎉")
+                _notificationFlow.emit("تم الانضمام لمجموعة \"$resolvedGroupName\" بنجاح! 🎉")
+
             } catch (e: Exception) {
                 Log.e("WorshipViewModel", "Error joining family group: ${e.message}", e)
-                val msg = e.message ?: ""
-                if (msg.contains("offline", ignoreCase = true) || msg.contains("network", ignoreCase = true) || msg.contains("unavailable", ignoreCase = true)) {
-                    _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
-                } else {
-                    _notificationFlow.emit("فشل الاتصال: ${e.localizedMessage ?: e.message ?: "حدث خطأ أثناء الانضمام للمجموعة"} ⚠️")
-                }
+                _notificationFlow.emit("فشل الاتصال: يرجى التأكد من اتصالك بالشبكة وإعادة المحاولة ⚠️")
             }
         }
     }

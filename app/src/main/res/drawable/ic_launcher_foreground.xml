@@ -3,6 +3,6 @@
     <item
         android:width="108dp"
         android:height="108dp"
-        android:drawable="@drawable/zad_app_logo_1779524850959"
+        android:drawable="@drawable/zad_logo_1779473006776"
         android:gravity="center" />
 </layer-list>
