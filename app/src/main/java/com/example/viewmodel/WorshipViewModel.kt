@@ -906,7 +906,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
 
-            _notificationFlow.emit("جاري إنشاء المجموعة العائلية... ⏳")
+            _notificationFlow.emit("جاري التحقق من الاتصال بالشبكة وإنشاء المجموعة... ⏳")
 
             // Prioritize enabling Firestore network in case it is sleeping or offline
             try {
@@ -919,30 +919,31 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
             var inviteCode = ""
             var codeAttempts = 0
+            var networkErrorOccurred = false
+            
             while (codeAttempts < 3) {
                 val randCode = "ZAD-" + (1..4).map { chars.random() }.joinToString("")
                 try {
-                    val groupDoc = firestore.collection("groups").document(randCode).get().await()
+                    // Try to fetch from server source only to test connectivity and existence!
+                    val groupDoc = firestore.collection("groups").document(randCode)
+                        .get(com.google.firebase.firestore.Source.SERVER)
+                        .await()
                     if (groupDoc == null || !groupDoc.exists()) {
                         inviteCode = randCode
                         break
                     }
                 } catch (e: Exception) {
-                    if (inviteCode.isEmpty()) {
-                        inviteCode = randCode
-                    }
+                    Log.e("WorshipViewModel", "Check code existence exception: ${e.message}")
+                    networkErrorOccurred = true
+                    break
                 }
                 codeAttempts++
             }
-            if (inviteCode.isEmpty()) {
-                inviteCode = "ZAD-" + (1..4).map { chars.random() }.joinToString("")
-            }
 
-            val updated = currentSet.copy(
-                familyGroupName = groupName,
-                familyGroupInviteCode = inviteCode
-            )
-            repository.saveSettings(updated)
+            if (networkErrorOccurred || inviteCode.isEmpty()) {
+                _notificationFlow.emit("فشل الاتصال: يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من إنشاء المجموعة سحابياً 📶")
+                return@launch
+            }
 
             val percentage = currentProgress.value.calculatePercentage()
             val me = FamilyMember(
@@ -955,55 +956,68 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 likedByMe = false,
                 lastWorship = ""
             )
-            repository.clearFamilyMembers()
-            repository.insertFamilyMembers(listOf(me))
-
-            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $inviteCode 👥")
 
             try {
-                // Save group metadata in Firestore (locally immediate, syncs to cloud in BG)
-                firestore.collection("groups").document(inviteCode).set(
-                    mapOf(
-                        "name" to groupName,
-                        "inviteCode" to inviteCode,
-                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                        "createdBy" to finalUserId
+                // Force an online transaction write for group creation to lock it in Firestore
+                firestore.runTransaction { transaction ->
+                    val groupRef = firestore.collection("groups").document(inviteCode)
+                    val memberRef = groupRef.collection("members").document(finalUserId)
+                    val userRef = firestore.collection("users").document(finalUserId)
+
+                    // Write group metadata
+                    transaction.set(
+                        groupRef,
+                        mapOf(
+                            "name" to groupName,
+                            "inviteCode" to inviteCode,
+                            "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                            "createdBy" to finalUserId
+                        )
                     )
-                ).addOnFailureListener { e ->
-                    Log.e("WorshipViewModel", "Offline/BG sync group meta queued: ${e.message}")
-                }
 
-                // Save first member with 0 likes initially
-                val meMap = mapOf(
-                    "userId" to finalUserId,
-                    "name" to finalUserName,
-                    "relation" to "منشئ المجموعة",
-                    "avatarUrl" to finalUserAvatar,
-                    "progress" to percentage,
-                    "likesCount" to 0,
-                    "lastWorship" to "",
-                    "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    // Write creator member subcollection record
+                    transaction.set(
+                        memberRef,
+                        mapOf(
+                            "userId" to finalUserId,
+                            "name" to finalUserName,
+                            "relation" to "منشئ المجموعة",
+                            "avatarUrl" to finalUserAvatar,
+                            "progress" to percentage,
+                            "likesCount" to 0,
+                            "lastWorship" to "",
+                            "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        )
+                    )
+
+                    // Write user's active group reference
+                    transaction.set(
+                        userRef,
+                        mapOf(
+                            "activeGroupCode" to inviteCode,
+                            "activeGroupName" to groupName
+                        ),
+                        com.google.firebase.firestore.SetOptions.merge()
+                    )
+                }.await()
+
+                // Save settings is now done AFTER Firestore 100% commits on the cloud server successfully!
+                val updated = currentSet.copy(
+                    familyGroupName = groupName,
+                    familyGroupInviteCode = inviteCode
                 )
-                firestore.collection("groups").document(inviteCode).collection("members").document(finalUserId).set(meMap).addOnFailureListener { e ->
-                    Log.e("WorshipViewModel", "Offline/BG sync member queued: ${e.message}")
-                }
+                repository.saveSettings(updated)
 
-                // Save user active group reference
-                firestore.collection("users").document(finalUserId).set(
-                    mapOf(
-                        "activeGroupCode" to inviteCode,
-                        "activeGroupName" to groupName
-                    ),
-                    com.google.firebase.firestore.SetOptions.merge()
-                ).addOnFailureListener { e ->
-                    Log.e("WorshipViewModel", "Offline/BG sync user meta queued: ${e.message}")
-                }
+                repository.clearFamilyMembers()
+                repository.insertFamilyMembers(listOf(me))
 
                 // Listen to updates in real-time
                 listenToFamilyUpdates(inviteCode)
+
+                _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $inviteCode 👥")
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Background cloud sync queued: ${e.message}", e)
-                _notificationFlow.emit("جاري مزامنة بيانات المجموعة سحابياً في الخلفية... 📶")
+                Log.e("WorshipViewModel", "Transaction group creation failure: ${e.message}", e)
+                _notificationFlow.emit("فشل الاتصال: يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من إنشاء المجموعة سحابياً 📶")
             }
         }
     }
@@ -1115,52 +1129,55 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
             _notificationFlow.emit("جاري البحث عن المجموعة والانضمام... ⏳")
 
-            // Call our super robust REST validation first!
-            val restResult = fetchGroupNameViaRest(trimmedCode)
-            val restError = restResult.second
-            val actualGroupName = restResult.first
+            // Ensure Firestore network is enabled
+            try {
+                firestore.enableNetwork().await()
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Failed to enable network: ${e.message}")
+            }
 
-            if (restError != null) {
-                if (restError == "NOT_FOUND") {
-                    _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
-                    return@launch
+            var resolvedGroupName: String? = null
+            var lastError: Exception? = null
+
+            // 1. Try fetching via native SDK with SERVER source (Fast, Native, highly secure)
+            try {
+                val doc = firestore.collection("groups").document(trimmedCode)
+                    .get(com.google.firebase.firestore.Source.SERVER)
+                    .await()
+                if (doc != null && doc.exists()) {
+                    resolvedGroupName = doc.getString("name") ?: "مجموعة زاد العائلية"
+                }
+            } catch (e: Exception) {
+                Log.w("WorshipViewModel", "Native SERVER fetch failed: ${e.message}")
+                lastError = e
+            }
+
+            // 2. Fallback to API REST if Native SDK was blocked or had issues
+            if (resolvedGroupName == null) {
+                val restResult = fetchGroupNameViaRest(trimmedCode)
+                val restError = restResult.second
+                val actualGroupName = restResult.first
+                
+                if (restError == null && actualGroupName != null) {
+                    resolvedGroupName = actualGroupName
                 } else if (restError == "NETWORK_ERROR") {
                     _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
                     return@launch
-                } else {
-                    // Fallback for any other API error (like 403, 500, or raw message) to try standard Firestore flow
-                    Log.w("WorshipViewModel", "REST check failed with $restError, falling back to direct Firestore fetch")
                 }
             }
 
-            try {
-                // Ensure Firestore network is enabled
-                try {
-                    firestore.enableNetwork()
-                } catch (e: Exception) {
-                    Log.e("WorshipViewModel", "Failed to enable network: ${e.message}")
-                }
-
-                // If REST gave us a name, we are 100% sure the group exists, so we don't query again to save time/bandwidth!
-                val resolvedGroupName = if (actualGroupName != null) {
-                    actualGroupName
+            // If both returned null, either the code is genuinely invalid (NOT_FOUND) or there's a real network connection issue
+            if (resolvedGroupName == null) {
+                val errMsg = lastError?.message ?: ""
+                if (errMsg.contains("offline", ignoreCase = true) || errMsg.contains("unavailable", ignoreCase = true)) {
+                    _notificationFlow.emit("فشل الاتصال: يرجى التأكد من اتصالك بالشبكة وإعادة المحاولة ⚠️")
                 } else {
-                    // Fallback fetch via Firestore directly in case REST had unexpected issues
-                    val doc = firestore.collection("groups").document(trimmedCode).get().await()
-                    if (doc == null || !doc.exists()) {
-                        _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
-                        return@launch
-                    }
-                    doc.getString("name") ?: "مجموعة زاد العائلية"
+                    _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
                 }
+                return@launch
+            }
 
-                // Update settings locally
-                val updated = currentSet.copy(
-                    familyGroupName = resolvedGroupName,
-                    familyGroupInviteCode = trimmedCode
-                )
-                repository.saveSettings(updated)
-
+            try {
                 val percentage = currentProgress.value.calculatePercentage()
 
                 val lastWorship = when {
@@ -1186,21 +1203,24 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                 )
 
-                // Save to Firestore members subcollection
-                firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).addOnFailureListener { e ->
-                    Log.e("WorshipViewModel", "Offline/BG sync joining member queued: ${e.message}")
-                }
+                // Save to Firestore members subcollection (AWAIT server confirmation!)
+                firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).await()
 
-                // Save User Metadata
+                // Save User Metadata (AWAIT server confirmation!)
                 firestore.collection("users").document(finalUserId).set(
                     mapOf(
                         "activeGroupCode" to trimmedCode,
                         "activeGroupName" to resolvedGroupName
                     ),
                     com.google.firebase.firestore.SetOptions.merge()
-                ).addOnFailureListener { e ->
-                    Log.e("WorshipViewModel", "Offline/BG sync joining user metadata queued: ${e.message}")
-                }
+                ).await()
+
+                // Update settings locally only after server confirms the join!
+                val updated = currentSet.copy(
+                    familyGroupName = resolvedGroupName,
+                    familyGroupInviteCode = trimmedCode
+                )
+                repository.saveSettings(updated)
 
                 // Clear previous local cached members and let listener sync fresh
                 repository.clearFamilyMembers()
@@ -1211,7 +1231,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 _notificationFlow.emit("تم الانضمام لمجموعة \"$resolvedGroupName\" بنجاح! 🎉")
 
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Error joining family group: ${e.message}", e)
+                Log.e("WorshipViewModel", "Error joining family group writes: ${e.message}", e)
                 _notificationFlow.emit("فشل الاتصال: يرجى التأكد من اتصالك بالشبكة وإعادة المحاولة ⚠️")
             }
         }
