@@ -866,200 +866,13 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // Family Group Space Integration Methods
-    fun createFamilyGroup(groupName: String) {
-        viewModelScope.launch {
-            val currentSet = settings.value
-            var finalUserId = currentSet.googleUserId
-            var finalUserName = currentSet.googleUserName
-            var finalUserAvatar = currentSet.googleUserAvatarUrl
-
-            if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
-                finalUserId = "user_${(100000..999999).random()}"
-                finalUserName = "مستخدم زاد"
-                finalUserAvatar = "avatar${(1..4).random()}"
-            }
-
-            // Generate a secure 6-character invite code
-            val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-            val randomCode = (1..6).map { chars.random() }.joinToString("")
-            
-            _notificationFlow.emit("جاري إنشاء المجموعة \"$groupName\"... ⏳")
-
-            // Offline-first: Immediately write the complete updated AppSettings to local Room Database!
-            val updated = currentSet.copy(
-                isGoogleSignedIn = true,
-                googleUserId = finalUserId,
-                googleUserName = finalUserName,
-                googleUserAvatarUrl = finalUserAvatar,
-                familyGroupName = groupName,
-                familyGroupInviteCode = randomCode
-            )
-            repository.saveSettings(updated)
-
-            val me = FamilyMember(
-                userId = finalUserId,
-                name = finalUserName,
-                relation = "مالك المجموعة",
-                avatarUrl = finalUserAvatar,
-                progress = currentProgress.value.calculatePercentage(),
-                lastWorship = "الآن"
-            )
-            repository.clearFamilyMembers()
-            repository.insertFamilyMembers(listOf(me))
-
-            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $randomCode 👥")
-            
-            // Effortlessly try to push to Firestore in the background
-            try {
-                firestore.collection("groups").document(randomCode).set(
-                    mapOf(
-                        "name" to groupName,
-                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
-                        "createdBy" to finalUserId
-                    )
-                )
-                
-                val meMap = mapOf(
-                    "userId" to me.userId,
-                    "name" to me.name,
-                    "relation" to me.relation,
-                    "avatarUrl" to me.avatarUrl,
-                    "progress" to me.progress,
-                    "likesCount" to me.likesCount,
-                    "lastWorship" to me.lastWorship
-                )
-                firestore.collection("groups").document(randomCode).collection("members").document(me.userId).set(meMap)
-                firestore.collection("users").document(me.userId).set(
-                    mapOf(
-                        "activeGroupCode" to randomCode,
-                        "activeGroupName" to groupName
-                    )
-                )
-                syncProgressToCloudExplicit(currentProgress.value, randomCode)
-                listenToFamilyUpdates(randomCode)
-            } catch (e: Exception) {
-                // Background sync error, safe to ignore for offline-first
-            }
-        }
-    }
-
-    fun joinFamilyGroup(inviteCode: String) {
-        viewModelScope.launch {
-            val currentSet = settings.value
-            var finalUserId = currentSet.googleUserId
-            var finalUserName = currentSet.googleUserName
-            var finalUserAvatar = currentSet.googleUserAvatarUrl
-
-            // Structuring base sign-in safely to prevent any async write race conditions!
-            val updatedBase = if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
-                finalUserId = "user_${(1000..9999).random()}"
-                finalUserName = "مستخدم زاد"
-                finalUserAvatar = "avatar${(1..4).random()}"
-                currentSet.copy(
-                    isGoogleSignedIn = true,
-                    googleUserId = finalUserId,
-                    googleUserName = finalUserName,
-                    googleUserAvatarUrl = finalUserAvatar
-                )
-            } else {
-                currentSet
-            }
-
-            val trimmedCode = inviteCode.trim().uppercase()
-            if (trimmedCode.isEmpty() || trimmedCode.length < 5) {
-               _notificationFlow.emit("رمز الدعوة غير صحيح ⚠️")
-               return@launch
-            }
-
-            _notificationFlow.emit("جاري الانضمام لمجموعة عبر الرمز... ⏳")
-            repository.clearFamilyMembers()
-
-            val me = FamilyMember(
-                userId = finalUserId,
-                name = finalUserName,
-                relation = "عضو",
-                avatarUrl = finalUserAvatar,
-                progress = currentProgress.value.calculatePercentage(),
-                lastWorship = "الآن"
-            )
-
-            // Optimistic Local Join First!
-            val localGroupName = "مجموعة زاد العائلية"
-            
-            val optimisticUpdated = updatedBase.copy(
-                familyGroupName = localGroupName,
-                familyGroupInviteCode = trimmedCode
-            )
-            repository.saveSettings(optimisticUpdated)
-            repository.insertFamilyMembers(listOf(me))
-            
-            _notificationFlow.emit("تم الانضمام للمجموعة! جاري المزامنة... 🟢")
-
-            try {
-                // Queue my membership write immediately (works offline)
-                val meMap = mapOf(
-                     "userId" to me.userId,
-                     "name" to me.name,
-                     "relation" to me.relation,
-                     "avatarUrl" to me.avatarUrl,
-                     "progress" to me.progress,
-                     "likesCount" to me.likesCount,
-                     "lastWorship" to me.lastWorship
-                )
-                firestore.collection("groups").document(trimmedCode).collection("members").document(me.userId).set(meMap)
-                firestore.collection("users").document(me.userId).set(
-                    mapOf(
-                        "activeGroupCode" to trimmedCode,
-                        "activeGroupName" to localGroupName
-                    )
-                )
-                syncProgressToCloudExplicit(currentProgress.value, trimmedCode)
-                listenToFamilyUpdates(trimmedCode)
-            } catch (e: Exception) {
-                // Ignore queue errors
-            }
-
-            // Try contacting cloud Firestore synchronously to get the REAL group name
-            try {
-                firestore.collection("groups").document(trimmedCode).get()
-                    .addOnCompleteListener { task ->
-                        viewModelScope.launch {
-                            if (task.isSuccessful && task.result != null && task.result!!.exists()) {
-                                val doc = task.result!!
-                                val actualGroupName = doc.getString("name") ?: localGroupName
-                                
-                                val finalUpdated = optimisticUpdated.copy(
-                                    familyGroupName = actualGroupName
-                                )
-                                repository.saveSettings(finalUpdated)
-                                
-                                // Also update the user activeGroupName
-                                try {
-                                    firestore.collection("users").document(me.userId).update("activeGroupName", actualGroupName)
-                                } catch (e:Exception) {}
-                                
-                                _notificationFlow.emit("تم مزامنة اسم المجموعة العائلية واستعادة البيانات بنجاح: $actualGroupName 👥")
-                            } else {
-                                // Background sync failed or group doesn't exist yet, but we stay optimistic.
-                                // Don't revert the join. Let them stay in the group until they leave.
-                                val msg = task.exception?.message ?: ""
-                                if (!msg.contains("offline", ignoreCase = true) && task.isSuccessful) {
-                                    // It actually doesn't exist!
-                                   _notificationFlow.emit("ملاحظة: رمز الدعوة غير متوفر حالياً على الخادم، سيتم إنشاؤه عند اتصالك ومشاركتك ⚠️")
-                                }
-                            }
-                        }
-                    }
-            } catch (e: Exception) {
-                // Background get error
-            }
-        }
-    }
 
     fun leaveFamilyGroup() {
         viewModelScope.launch {
             val currentSet = settings.value
+            val groupCode = currentSet.familyGroupInviteCode
+            val userId = currentSet.googleUserId
+            
             val updated = currentSet.copy(
                 familyGroupName = "",
                 familyGroupInviteCode = ""
@@ -1067,13 +880,205 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             repository.saveSettings(updated)
             repository.clearFamilyMembers() // clear current family circle members
             try {
-                if (currentSet.isGoogleSignedIn && currentSet.googleUserId.isNotEmpty() && currentSet.googleUserId != "default") {
-                    firestore.collection("users").document(currentSet.googleUserId).delete()
+                if (currentSet.isGoogleSignedIn && userId.isNotEmpty() && userId != "default") {
+                    firestore.collection("users").document(userId).delete()
+                    if (groupCode.isNotEmpty()) {
+                        firestore.collection("groups").document(groupCode)
+                            .collection("members").document(userId).delete()
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
             _notificationFlow.emit("تم مغادرة المجموعة العائلية. 👥")
+        }
+    }
+
+    fun createFamilyGroup(groupName: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val finalUserId = currentSet.googleUserId
+            val finalUserName = currentSet.googleUserName
+            val finalUserAvatar = currentSet.googleUserAvatarUrl
+
+            if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
+                _notificationFlow.emit("يجب تسجيل الدخول أولاً لإنشاء مجموعة ⚠️")
+                return@launch
+            }
+
+            _notificationFlow.emit("جاري إنشاء المجموعة العائلية... ⏳")
+
+            // Generates unique code and checks if it exists in Firestore, up to 3 attempts
+            val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            var inviteCode = ""
+            var codeAttempts = 0
+            while (codeAttempts < 3) {
+                val randCode = "ZAD-" + (1..4).map { chars.random() }.joinToString("")
+                try {
+                    val groupDoc = firestore.collection("groups").document(randCode).get().await()
+                    if (groupDoc == null || !groupDoc.exists()) {
+                        inviteCode = randCode
+                        break
+                    }
+                } catch (e: Exception) {
+                    if (inviteCode.isEmpty()) {
+                        inviteCode = randCode
+                    }
+                }
+                codeAttempts++
+            }
+            if (inviteCode.isEmpty()) {
+                inviteCode = "ZAD-" + (1..4).map { chars.random() }.joinToString("")
+            }
+
+            val updated = currentSet.copy(
+                familyGroupName = groupName,
+                familyGroupInviteCode = inviteCode
+            )
+            repository.saveSettings(updated)
+
+            val percentage = currentProgress.value.calculatePercentage()
+            val me = FamilyMember(
+                userId = finalUserId,
+                name = finalUserName,
+                relation = "منشئ المجموعة",
+                avatarUrl = finalUserAvatar,
+                progress = percentage,
+                likesCount = 0,
+                likedByMe = false,
+                lastWorship = ""
+            )
+            repository.clearFamilyMembers()
+            repository.insertFamilyMembers(listOf(me))
+
+            _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $inviteCode 👥")
+
+            try {
+                // Save group metadata
+                firestore.collection("groups").document(inviteCode).set(
+                    mapOf(
+                        "name" to groupName,
+                        "inviteCode" to inviteCode,
+                        "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                        "createdBy" to finalUserId
+                    )
+                ).await()
+
+                // Save first member with 0 likes initially
+                val meMap = mapOf(
+                    "userId" to finalUserId,
+                    "name" to finalUserName,
+                    "relation" to "منشئ المجموعة",
+                    "avatarUrl" to finalUserAvatar,
+                    "progress" to percentage,
+                    "likesCount" to 0,
+                    "lastWorship" to "",
+                    "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+                firestore.collection("groups").document(inviteCode).collection("members").document(finalUserId).set(meMap).await()
+
+                // Save user active group reference
+                firestore.collection("users").document(finalUserId).set(
+                    mapOf(
+                        "activeGroupCode" to inviteCode,
+                        "activeGroupName" to groupName
+                    ),
+                    com.google.firebase.firestore.SetOptions.merge()
+                ).await()
+
+                // Listen to updates in real-time
+                listenToFamilyUpdates(inviteCode)
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Error sync group creation: ${e.message}")
+            }
+        }
+    }
+
+    fun joinFamilyGroup(inviteCode: String) {
+        viewModelScope.launch {
+            val currentSet = settings.value
+            val finalUserId = currentSet.googleUserId
+            val finalUserName = currentSet.googleUserName
+            val finalUserAvatar = currentSet.googleUserAvatarUrl
+
+            if (!currentSet.isGoogleSignedIn || finalUserId.isBlank() || finalUserId == "default") {
+                _notificationFlow.emit("يجب تسجيل الدخول أولاً للانضمام لمجموعة ⚠️")
+                return@launch
+            }
+
+            val trimmedCode = inviteCode.trim().uppercase()
+            if (trimmedCode.isEmpty() || trimmedCode.length < 4) {
+                _notificationFlow.emit("رمز الدعوة غير صحيح ⚠️")
+                return@launch
+            }
+
+            _notificationFlow.emit("جاري البحث عن المجموعة والانضمام... ⏳")
+
+            try {
+                // Verify if group exists in Firestore
+                val groupDoc = firestore.collection("groups").document(trimmedCode).get().await()
+                if (groupDoc == null || !groupDoc.exists()) {
+                    _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
+                    return@launch
+                }
+
+                val actualGroupName = groupDoc.getString("name") ?: "مجموعة زاد العائلية"
+
+                // Update settings locally
+                val updated = currentSet.copy(
+                    familyGroupName = actualGroupName,
+                    familyGroupInviteCode = trimmedCode
+                )
+                repository.saveSettings(updated)
+
+                val percentage = currentProgress.value.calculatePercentage()
+
+                val lastWorship = when {
+                    currentProgress.value.quranRead -> "ورد القرآن"
+                    currentProgress.value.adhkarEvening -> "أذكار المساء"
+                    currentProgress.value.adhkarMorning -> "أذكار الصباح"
+                    currentProgress.value.isha -> "صلاة العشاء"
+                    currentProgress.value.maghrib -> "صلاة المغرب"
+                    currentProgress.value.asr -> "صلاة العصر"
+                    currentProgress.value.dhuhr -> "صلاة الظهر"
+                    currentProgress.value.fajr -> "صلاة الفجر"
+                    else -> ""
+                }
+
+                val memberMap = mapOf(
+                    "userId" to finalUserId,
+                    "name" to finalUserName,
+                    "relation" to "عضو",
+                    "avatarUrl" to finalUserAvatar,
+                    "progress" to percentage,
+                    "likesCount" to 0,
+                    "lastWorship" to lastWorship,
+                    "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+
+                // Save to Firestore members subcollection
+                firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).await()
+
+                // Save User Metadata
+                firestore.collection("users").document(finalUserId).set(
+                    mapOf(
+                        "activeGroupCode" to trimmedCode,
+                        "activeGroupName" to actualGroupName
+                    ),
+                    com.google.firebase.firestore.SetOptions.merge()
+                ).await()
+
+                // Clear previous local cached members and let listener sync fresh
+                repository.clearFamilyMembers()
+
+                // Start Listening to family updates
+                listenToFamilyUpdates(trimmedCode)
+
+                _notificationFlow.emit("تم الانضمام لمجموعة \"$actualGroupName\" بنجاح! 🎉")
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "Error joining family group: ${e.message}")
+                _notificationFlow.emit("حدث خطأ أثناء الاتصال بالخادم والانضمام للمجموعة ⚠️")
+            }
         }
     }
 

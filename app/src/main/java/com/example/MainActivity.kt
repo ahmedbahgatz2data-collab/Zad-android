@@ -1594,12 +1594,12 @@ fun FamilyScreen(
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Button(
-                                    onClick = {
-                                        if (groupInviteCodeToJoin.isNotBlank()) {
-                                            viewModel.joinFamilyGroup(groupInviteCodeToJoin)
-                                            groupInviteCodeToJoin = ""
-                                        }
-                                    },
+                                        onClick = {
+                                            if (groupInviteCodeToJoin.isNotBlank()) {
+                                                viewModel.joinFamilyGroup(groupInviteCodeToJoin)
+                                                groupInviteCodeToJoin = ""
+                                            }
+                                        },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                                     shape = RoundedCornerShape(12.dp)
