@@ -1099,7 +1099,12 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 _notificationFlow.emit("تم الانضمام لمجموعة \"$actualGroupName\" بنجاح! 🎉")
             } catch (e: Exception) {
                 Log.e("WorshipViewModel", "Error joining family group: ${e.message}", e)
-                _notificationFlow.emit("فشل الاتصال: ${e.localizedMessage ?: e.message ?: "حدث خطأ أثناء الانضمام للمجموعة"} ⚠️")
+                val msg = e.message ?: ""
+                if (msg.contains("offline", ignoreCase = true) || msg.contains("network", ignoreCase = true) || msg.contains("unavailable", ignoreCase = true)) {
+                    _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
+                } else {
+                    _notificationFlow.emit("فشل الاتصال: ${e.localizedMessage ?: e.message ?: "حدث خطأ أثناء الانضمام للمجموعة"} ⚠️")
+                }
             }
         }
     }
