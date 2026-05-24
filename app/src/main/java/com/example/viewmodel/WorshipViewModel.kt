@@ -954,7 +954,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $inviteCode 👥")
 
             try {
-                // Save group metadata
+                // Save group metadata in Firestore (locally immediate, syncs to cloud in BG)
                 firestore.collection("groups").document(inviteCode).set(
                     mapOf(
                         "name" to groupName,
@@ -962,7 +962,9 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                         "createdBy" to finalUserId
                     )
-                ).await()
+                ).addOnFailureListener { e ->
+                    Log.e("WorshipViewModel", "Offline/BG sync group meta queued: ${e.message}")
+                }
 
                 // Save first member with 0 likes initially
                 val meMap = mapOf(
@@ -975,7 +977,9 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     "lastWorship" to "",
                     "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                 )
-                firestore.collection("groups").document(inviteCode).collection("members").document(finalUserId).set(meMap).await()
+                firestore.collection("groups").document(inviteCode).collection("members").document(finalUserId).set(meMap).addOnFailureListener { e ->
+                    Log.e("WorshipViewModel", "Offline/BG sync member queued: ${e.message}")
+                }
 
                 // Save user active group reference
                 firestore.collection("users").document(finalUserId).set(
@@ -984,13 +988,15 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                         "activeGroupName" to groupName
                     ),
                     com.google.firebase.firestore.SetOptions.merge()
-                ).await()
+                ).addOnFailureListener { e ->
+                    Log.e("WorshipViewModel", "Offline/BG sync user meta queued: ${e.message}")
+                }
 
                 // Listen to updates in real-time
                 listenToFamilyUpdates(inviteCode)
             } catch (e: Exception) {
                 Log.e("WorshipViewModel", "Error sync group creation: ${e.message}", e)
-                _notificationFlow.emit("فشل مزامنة المجموعة سحابياً: ${e.localizedMessage ?: e.message} ⚠️")
+                _notificationFlow.emit("حدث خطأ أثناء إعداد المجموعة: ${e.localizedMessage ?: e.message} ⚠️")
             }
         }
     }
@@ -1017,7 +1023,18 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
             try {
                 // Verify if group exists in Firestore
-                val groupDoc = firestore.collection("groups").document(trimmedCode).get().await()
+                val groupDoc = try {
+                    firestore.collection("groups").document(trimmedCode).get().await()
+                } catch (e: Exception) {
+                    val msg = e.message ?: ""
+                    if (msg.contains("offline", ignoreCase = true) || msg.contains("network", ignoreCase = true) || msg.contains("unavailable", ignoreCase = true)) {
+                        _notificationFlow.emit("أنت غير متصل بالإنترنت حالياً 📶 يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من الانضمام للمجموعة سحابياً.")
+                        return@launch
+                    } else {
+                        throw e
+                    }
+                }
+
                 if (groupDoc == null || !groupDoc.exists()) {
                     _notificationFlow.emit("عذرًا، كود المجموعة هذا غير موجود ⚠️")
                     return@launch
@@ -1057,17 +1074,21 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                 )
 
-                // Save to Firestore members subcollection
-                firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).await()
+                // Save to Firestore members subcollection (locally immediate, syncs to cloud in BG)
+                firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).addOnFailureListener { e ->
+                    Log.e("WorshipViewModel", "Offline/BG sync joining member queued: ${e.message}")
+                }
 
-                // Save User Metadata
+                // Save User Metadata (locally immediate, syncs to cloud in BG)
                 firestore.collection("users").document(finalUserId).set(
                     mapOf(
                         "activeGroupCode" to trimmedCode,
                         "activeGroupName" to actualGroupName
                     ),
                     com.google.firebase.firestore.SetOptions.merge()
-                ).await()
+                ).addOnFailureListener { e ->
+                    Log.e("WorshipViewModel", "Offline/BG sync joining user metadata queued: ${e.message}")
+                }
 
                 // Clear previous local cached members and let listener sync fresh
                 repository.clearFamilyMembers()
