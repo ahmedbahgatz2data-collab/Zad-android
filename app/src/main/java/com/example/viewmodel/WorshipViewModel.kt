@@ -908,13 +908,6 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
             _notificationFlow.emit("جاري التحقق من الاتصال بالشبكة وإنشاء المجموعة... ⏳")
 
-            // Prioritize enabling Firestore network in case it is sleeping or offline
-            try {
-                firestore.enableNetwork().await()
-            } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Failed to enable network: ${e.message}")
-            }
-
             // Generates unique code and checks if it exists in Firestore, up to 3 attempts
             val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
             var inviteCode = ""
@@ -924,12 +917,15 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             while (codeAttempts < 3) {
                 val randCode = "ZAD-" + (1..4).map { chars.random() }.joinToString("")
                 try {
-                    // Try to fetch from server source only to test connectivity and existence!
-                    val groupDoc = firestore.collection("groups").document(randCode)
-                        .get(com.google.firebase.firestore.Source.SERVER)
-                        .await()
-                    if (groupDoc == null || !groupDoc.exists()) {
+                    // Try to fetch from server source only to test connectivity and existence via REST bypass!
+                    val restResult = fetchGroupNameViaRest(randCode)
+                    val restError = restResult.second
+                    
+                    if (restError == "NOT_FOUND") {
                         inviteCode = randCode
+                        break
+                    } else if (restError == "NETWORK_ERROR") {
+                        networkErrorOccurred = true
                         break
                     }
                 } catch (e: Exception) {
@@ -958,26 +954,78 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             )
 
             try {
-                // Force an online transaction write for group creation to lock it in Firestore
-                firestore.runTransaction { transaction ->
+                // Generate current timestamp in ISO 8601 UTC formats for Firestore timestampValue REST
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                val nowIsoStr = sdf.format(java.util.Date())
+
+                // 1. Create group via REST
+                val groupBody = """
+                {
+                  "fields": {
+                    "name": { "stringValue": "${escapeJsonString(groupName)}" },
+                    "inviteCode": { "stringValue": "$inviteCode" },
+                    "createdAt": { "timestampValue": "$nowIsoStr" },
+                    "createdBy": { "stringValue": "$finalUserId" }
+                  }
+                }
+                """.trimIndent()
+                val groupWriteResult = writeDocumentViaRest("groups", inviteCode, groupBody)
+                if (!groupWriteResult.first) {
+                    throw Exception("Failed to write group via REST: ${groupWriteResult.second}")
+                }
+
+                // 2. Create creator member record via REST
+                val memberBody = """
+                {
+                  "fields": {
+                    "userId": { "stringValue": "$finalUserId" },
+                    "name": { "stringValue": "${escapeJsonString(finalUserName)}" },
+                    "relation": { "stringValue": "${escapeJsonString("منشئ المجموعة")}" },
+                    "avatarUrl": { "stringValue": "${escapeJsonString(finalUserAvatar)}" },
+                    "progress": { "doubleValue": $percentage },
+                    "likesCount": { "integerValue": "0" },
+                    "lastWorship": { "stringValue": "" },
+                    "lastUpdated": { "timestampValue": "$nowIsoStr" }
+                  }
+                }
+                """.trimIndent()
+                val memberWriteResult = writeDocumentViaRest("groups/$inviteCode/members", finalUserId, memberBody)
+                if (!memberWriteResult.first) {
+                    throw Exception("Failed to write member via REST: ${memberWriteResult.second}")
+                }
+
+                // 3. Update user active group reference via REST
+                val userBody = """
+                {
+                  "fields": {
+                    "activeGroupCode": { "stringValue": "$inviteCode" },
+                    "activeGroupName": { "stringValue": "${escapeJsonString(groupName)}" }
+                  }
+                }
+                """.trimIndent()
+                val userPatchResult = patchDocumentViaRest("users/$finalUserId", userBody, listOf("activeGroupCode", "activeGroupName"))
+                if (!userPatchResult.first) {
+                    throw Exception("Failed to update user via REST: ${userPatchResult.second}")
+                }
+
+                // REST writes succeeded! Now trigger native SDK local writes asynchronously in the background.
+                // This ensures local caches are populated immediately for real-time listeners.
+                try {
                     val groupRef = firestore.collection("groups").document(inviteCode)
                     val memberRef = groupRef.collection("members").document(finalUserId)
                     val userRef = firestore.collection("users").document(finalUserId)
 
-                    // Write group metadata
-                    transaction.set(
-                        groupRef,
+                    groupRef.set(
                         mapOf(
                             "name" to groupName,
                             "inviteCode" to inviteCode,
                             "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                             "createdBy" to finalUserId
                         )
-                    )
+                    ).addOnFailureListener { e -> Log.w("WorshipViewModel", "SDK group cache write queued: ${e.message}") }
 
-                    // Write creator member subcollection record
-                    transaction.set(
-                        memberRef,
+                    memberRef.set(
                         mapOf(
                             "userId" to finalUserId,
                             "name" to finalUserName,
@@ -988,20 +1036,21 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                             "lastWorship" to "",
                             "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
                         )
-                    )
+                    ).addOnFailureListener { e -> Log.w("WorshipViewModel", "SDK member cache write queued: ${e.message}") }
 
-                    // Write user's active group reference
-                    transaction.set(
-                        userRef,
+                    userRef.set(
                         mapOf(
                             "activeGroupCode" to inviteCode,
                             "activeGroupName" to groupName
                         ),
                         com.google.firebase.firestore.SetOptions.merge()
-                    )
-                }.await()
+                    ).addOnFailureListener { e -> Log.w("WorshipViewModel", "SDK user cache write queued: ${e.message}") }
 
-                // Save settings is now done AFTER Firestore 100% commits on the cloud server successfully!
+                } catch (se: Exception) {
+                    Log.w("WorshipViewModel", "Ignore SDK cache local writes failure since REST wrote successfully: ${se.message}")
+                }
+
+                // Save settings locally only after cloud server confirms writes successfully!
                 val updated = currentSet.copy(
                     familyGroupName = groupName,
                     familyGroupInviteCode = inviteCode
@@ -1016,7 +1065,7 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
                 _notificationFlow.emit("تم إنشاء مجموعة \"$groupName\" بنجاح! كود الدعوة: $inviteCode 👥")
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Transaction group creation failure: ${e.message}", e)
+                Log.e("WorshipViewModel", "REST group creation failure: ${e.message}", e)
                 _notificationFlow.emit("فشل الاتصال: يرجى التأكد من اتصال الهاتف بالشبكة لتتمكن من إنشاء المجموعة سحابياً 📶")
             }
         }
@@ -1079,6 +1128,127 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun escapeJsonString(value: String): String {
+        return value.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\r", "\\r")
+            .replace("\n", "\\n")
+    }
+
+    private suspend fun writeDocumentViaRest(
+        parentPath: String,
+        documentId: String,
+        fieldsJson: String
+    ): Pair<Boolean, String?> {
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            var connection: java.net.HttpURLConnection? = null
+            try {
+                val url = java.net.URL("https://firestore.googleapis.com/v1/projects/planar-cycle-299417/databases/(default)/documents/$parentPath?documentId=$documentId")
+                connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+
+                val idToken = try {
+                    val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                    if (user != null) {
+                        com.google.android.gms.tasks.Tasks.await(user.getIdToken(false)).token
+                    } else {
+                        null
+                    }
+                } catch (te: Exception) {
+                    Log.w("WorshipViewModel", "Error getting IdToken for REST write: ${te.message}")
+                    null
+                }
+
+                if (!idToken.isNullOrEmpty()) {
+                    connection.setRequestProperty("Authorization", "Bearer $idToken")
+                }
+
+                connection.outputStream.use { os ->
+                    val bytes = fieldsJson.toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+                    os.write(bytes, 0, bytes.size)
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode == 200 || responseCode == 201) {
+                    Pair(true, null)
+                } else {
+                    val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    Log.e("WorshipViewModel", "REST write error code $responseCode: $errorText")
+                    Pair(false, "ERROR_$responseCode")
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "REST write Exception: ${e.message}", e)
+                Pair(false, e.message)
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    private suspend fun patchDocumentViaRest(
+        documentPath: String,
+        fieldsJson: String,
+        fieldPathsToUpdate: List<String>
+    ): Pair<Boolean, String?> {
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            var connection: java.net.HttpURLConnection? = null
+            try {
+                val queryParams = fieldPathsToUpdate.joinToString("&") { "updateMask.fieldPaths=$it" }
+                val url = java.net.URL("https://firestore.googleapis.com/v1/projects/planar-cycle-299417/databases/(default)/documents/$documentPath?$queryParams")
+                connection = url.openConnection() as java.net.HttpURLConnection
+                try {
+                    connection.requestMethod = "PATCH"
+                } catch (pe: java.net.ProtocolException) {
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("X-HTTP-Method-Override", "PATCH")
+                }
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+
+                val idToken = try {
+                    val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                    if (user != null) {
+                        com.google.android.gms.tasks.Tasks.await(user.getIdToken(false)).token
+                    } else {
+                        null
+                    }
+                } catch (te: Exception) {
+                    Log.w("WorshipViewModel", "Error getting IdToken for REST patch: ${te.message}")
+                    null
+                }
+
+                if (!idToken.isNullOrEmpty()) {
+                    connection.setRequestProperty("Authorization", "Bearer $idToken")
+                }
+
+                connection.outputStream.use { os ->
+                    val bytes = fieldsJson.toByteArray(java.nio.charset.StandardCharsets.UTF_8)
+                    os.write(bytes, 0, bytes.size)
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode == 200 || responseCode == 201) {
+                    Pair(true, null)
+                } else {
+                    val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                    Log.e("WorshipViewModel", "REST patch error code $responseCode: $errorText")
+                    Pair(false, "ERROR_$responseCode")
+                }
+            } catch (e: Exception) {
+                Log.e("WorshipViewModel", "REST patch Exception: ${e.message}", e)
+                Pair(false, e.message)
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
     private fun extractGroupNameFromJson(jsonText: String): String {
         try {
             val fieldsIndex = jsonText.indexOf("\"fields\"")
@@ -1128,13 +1298,6 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
             }
 
             _notificationFlow.emit("جاري البحث عن المجموعة والانضمام... ⏳")
-
-            // Ensure Firestore network is enabled
-            try {
-                firestore.enableNetwork().await()
-            } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Failed to enable network: ${e.message}")
-            }
 
             var resolvedGroupName: String? = null
             var lastError: Exception? = null
@@ -1192,30 +1355,72 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                     else -> ""
                 }
 
-                val memberMap = mapOf(
-                    "userId" to finalUserId,
-                    "name" to finalUserName,
-                    "relation" to "عضو",
-                    "avatarUrl" to finalUserAvatar,
-                    "progress" to percentage,
-                    "likesCount" to 0,
-                    "lastWorship" to lastWorship,
-                    "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                )
+                // Generate ISO 8601 UTC timestamp format for Firestore timestampValue REST format
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                val nowIsoStr = sdf.format(java.util.Date())
 
-                // Save to Firestore members subcollection (AWAIT server confirmation!)
-                firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap).await()
+                // 1. Write member via REST
+                val memberBody = """
+                {
+                  "fields": {
+                    "userId": { "stringValue": "$finalUserId" },
+                    "name": { "stringValue": "${escapeJsonString(finalUserName)}" },
+                    "relation": { "stringValue": "${escapeJsonString("عضو")}" },
+                    "avatarUrl": { "stringValue": "${escapeJsonString(finalUserAvatar)}" },
+                    "progress": { "doubleValue": $percentage },
+                    "likesCount": { "integerValue": "0" },
+                    "lastWorship": { "stringValue": "${escapeJsonString(lastWorship)}" },
+                    "lastUpdated": { "timestampValue": "$nowIsoStr" }
+                  }
+                }
+                """.trimIndent()
+                val memberWriteResult = writeDocumentViaRest("groups/$trimmedCode/members", finalUserId, memberBody)
+                if (!memberWriteResult.first) {
+                    throw Exception("Failed to write member via REST: ${memberWriteResult.second}")
+                }
 
-                // Save User Metadata (AWAIT server confirmation!)
-                firestore.collection("users").document(finalUserId).set(
-                    mapOf(
-                        "activeGroupCode" to trimmedCode,
-                        "activeGroupName" to resolvedGroupName
-                    ),
-                    com.google.firebase.firestore.SetOptions.merge()
-                ).await()
+                // 2. Update user metadata active group reference via REST
+                val userBody = """
+                {
+                  "fields": {
+                    "activeGroupCode": { "stringValue": "$trimmedCode" },
+                    "activeGroupName": { "stringValue": "${escapeJsonString(resolvedGroupName)}" }
+                  }
+                }
+                """.trimIndent()
+                val userPatchResult = patchDocumentViaRest("users/$finalUserId", userBody, listOf("activeGroupCode", "activeGroupName"))
+                if (!userPatchResult.first) {
+                    throw Exception("Failed to update user via REST: ${userPatchResult.second}")
+                }
 
-                // Update settings locally only after server confirms the join!
+                // REST writes succeeded! Now trigger native SDK local writes asynchronously in the background.
+                try {
+                    val memberMap = mapOf(
+                        "userId" to finalUserId,
+                        "name" to finalUserName,
+                        "relation" to "عضو",
+                        "avatarUrl" to finalUserAvatar,
+                        "progress" to percentage,
+                        "likesCount" to 0,
+                        "lastWorship" to lastWorship,
+                        "lastUpdated" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    )
+                    firestore.collection("groups").document(trimmedCode).collection("members").document(finalUserId).set(memberMap)
+                        .addOnFailureListener { e -> Log.w("WorshipViewModel", "SDK join member local cache write queued: ${e.message}") }
+
+                    firestore.collection("users").document(finalUserId).set(
+                        mapOf(
+                            "activeGroupCode" to trimmedCode,
+                            "activeGroupName" to resolvedGroupName
+                        ),
+                        com.google.firebase.firestore.SetOptions.merge()
+                    ).addOnFailureListener { e -> Log.w("WorshipViewModel", "SDK join user cache write queued: ${e.message}") }
+                } catch (se: Exception) {
+                    Log.w("WorshipViewModel", "Ignore SDK cache local writes failure on join since REST wrote successfully: ${se.message}")
+                }
+
+                // Update settings locally only after cloud server confirms the join!
                 val updated = currentSet.copy(
                     familyGroupName = resolvedGroupName,
                     familyGroupInviteCode = trimmedCode
