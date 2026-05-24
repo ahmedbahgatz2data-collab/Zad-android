@@ -634,6 +634,56 @@ fun TodayScreen(
     val isDark = settings.isDarkMode
     var selectedCategory by remember { mutableStateOf("الجميع") }
 
+    var undoWorshipConfirmInfo by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+
+    val handleToggle: (String, Boolean, () -> Unit) -> Unit = { title, isChecked, action ->
+        if (isChecked) {
+            undoWorshipConfirmInfo = Pair(title, action)
+        } else {
+            action()
+        }
+    }
+
+    if (undoWorshipConfirmInfo != null) {
+        val (title, onConfirm) = undoWorshipConfirmInfo!!
+        AlertDialog(
+            onDismissRequest = { undoWorshipConfirmInfo = null },
+            title = {
+                Text(
+                    text = "تأكيد إلغاء العبادة",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Text(
+                    text = "هل أنت متأكد من رغبتك في إلغاء إنجاز \"$title\" الخاص بهذا اليوم؟",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onConfirm()
+                        undoWorshipConfirmInfo = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("نعم، إلغاء")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { undoWorshipConfirmInfo = null }
+                ) {
+                    Text("تراجع")
+                }
+            },
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -702,7 +752,7 @@ fun TodayScreen(
                         icon = Icons.Default.WbSunny,
                         modifier = Modifier.weight(1f),
                         isDark = isDark,
-                        onCheckedChange = { viewModel.toggleAdhkarMorning() }
+                        onCheckedChange = { handleToggle("أذكار الصباح", progress.adhkarMorning) { viewModel.toggleAdhkarMorning() } }
                     )
                     AdhkarCard(
                         title = "أذكار المساء",
@@ -711,7 +761,7 @@ fun TodayScreen(
                         icon = Icons.Default.NightlightRound,
                         modifier = Modifier.weight(1f),
                         isDark = isDark,
-                        onCheckedChange = { viewModel.toggleAdhkarEvening() }
+                        onCheckedChange = { handleToggle("أذكار المساء", progress.adhkarEvening) { viewModel.toggleAdhkarEvening() } }
                     )
                 }
             }
@@ -732,7 +782,7 @@ fun TodayScreen(
                 WorshipCheckItem(
                     title = "صلاة الفجر في وقتها",
                     isChecked = progress.fajr,
-                    onCheckedChange = { viewModel.toggleFajr() },
+                    onCheckedChange = { handleToggle("صلاة الفجر في وقتها", progress.fajr) { viewModel.toggleFajr() } },
                     icon = "🕌"
                 )
             }
@@ -740,7 +790,7 @@ fun TodayScreen(
                 WorshipCheckItem(
                     title = "صلاة الظهر في وقتها",
                     isChecked = progress.dhuhr,
-                    onCheckedChange = { viewModel.toggleDhuhr() },
+                    onCheckedChange = { handleToggle("صلاة الظهر في وقتها", progress.dhuhr) { viewModel.toggleDhuhr() } },
                     icon = "🕌"
                 )
             }
@@ -748,7 +798,7 @@ fun TodayScreen(
                 WorshipCheckItem(
                     title = "صلاة العصر في وقتها",
                     isChecked = progress.asr,
-                    onCheckedChange = { viewModel.toggleAsr() },
+                    onCheckedChange = { handleToggle("صلاة العصر في وقتها", progress.asr) { viewModel.toggleAsr() } },
                     icon = "🕌"
                 )
             }
@@ -756,7 +806,7 @@ fun TodayScreen(
                 WorshipCheckItem(
                     title = "صلاة المغرب في وقتها",
                     isChecked = progress.maghrib,
-                    onCheckedChange = { viewModel.toggleMaghrib() },
+                    onCheckedChange = { handleToggle("صلاة المغرب في وقتها", progress.maghrib) { viewModel.toggleMaghrib() } },
                     icon = "🕌"
                 )
             }
@@ -764,7 +814,7 @@ fun TodayScreen(
                 WorshipCheckItem(
                     title = "صلاة العشاء في وقتها",
                     isChecked = progress.isha,
-                    onCheckedChange = { viewModel.toggleIsha() },
+                    onCheckedChange = { handleToggle("صلاة العشاء في وقتها", progress.isha) { viewModel.toggleIsha() } },
                     icon = "🕌"
                 )
             }
@@ -775,7 +825,7 @@ fun TodayScreen(
                 WorshipCheckItem(
                     title = "الورد القرآني (قراءة كافية)",
                     isChecked = progress.quranRead,
-                    onCheckedChange = { viewModel.toggleQuranRead() },
+                    onCheckedChange = { handleToggle("الورد القرآني", progress.quranRead) { viewModel.toggleQuranRead() } },
                     icon = "📖"
                 )
             }
@@ -844,13 +894,13 @@ fun TodayScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 val sunnahsList = listOf(
-                                    SunnahBundle("ركعتا الفجر القبلية", progress.sunnahFajr, { viewModel.toggleSunnahFajr() }, "🌅"),
-                                    SunnahBundle("سنة الضحى المباركة", progress.sunnahDuha, { viewModel.toggleSunnahDuha() }, "☀️"),
-                                    SunnahBundle("سنة الظهر القبلية (٤ ركعات)", progress.sunnahDhuhrQabli, { viewModel.toggleSunnahDhuhrQabli() }, "🌤️"),
-                                    SunnahBundle("سنة الظهر البعدية (ركعتان)", progress.sunnahDhuhrBadi, { viewModel.toggleSunnahDhuhrBadi() }, "🌤️"),
-                                    SunnahBundle("سنة المغرب البعدية (ركعتان)", progress.sunnahMaghrib, { viewModel.toggleSunnahMaghrib() }, "🌇"),
-                                    SunnahBundle("سنة العشاء البعدية (ركعتان)", progress.sunnahIsha, { viewModel.toggleSunnahIsha() }, "🌌"),
-                                    SunnahBundle("قيام الليل والسر والوتر", progress.sunnahQiyam, { viewModel.toggleSunnahQiyam() }, "✨")
+                                    SunnahBundle("ركعتا الفجر القبلية", progress.sunnahFajr, { handleToggle("سنة الفجر القبلية", progress.sunnahFajr) { viewModel.toggleSunnahFajr() } }, "🌅"),
+                                    SunnahBundle("سنة الضحى المباركة", progress.sunnahDuha, { handleToggle("سنة الضحى المباركة", progress.sunnahDuha) { viewModel.toggleSunnahDuha() } }, "☀️"),
+                                    SunnahBundle("سنة الظهر القبلية (٤ ركعات)", progress.sunnahDhuhrQabli, { handleToggle("سنة الظهر القبلية", progress.sunnahDhuhrQabli) { viewModel.toggleSunnahDhuhrQabli() } }, "🌤️"),
+                                    SunnahBundle("سنة الظهر البعدية (ركعتان)", progress.sunnahDhuhrBadi, { handleToggle("سنة الظهر البعدية", progress.sunnahDhuhrBadi) { viewModel.toggleSunnahDhuhrBadi() } }, "🌤️"),
+                                    SunnahBundle("سنة المغرب البعدية (ركعتان)", progress.sunnahMaghrib, { handleToggle("سنة المغرب البعدية", progress.sunnahMaghrib) { viewModel.toggleSunnahMaghrib() } }, "🌇"),
+                                    SunnahBundle("سنة العشاء البعدية (ركعتان)", progress.sunnahIsha, { handleToggle("سنة العشاء البعدية", progress.sunnahIsha) { viewModel.toggleSunnahIsha() } }, "🌌"),
+                                    SunnahBundle("قيام الليل والسر والوتر", progress.sunnahQiyam, { handleToggle("قيام الليل والوتر", progress.sunnahQiyam) { viewModel.toggleSunnahQiyam() } }, "✨")
                                 )
 
                                 sunnahsList.forEach { s ->

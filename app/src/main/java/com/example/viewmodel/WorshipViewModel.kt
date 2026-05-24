@@ -989,7 +989,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
                 // Listen to updates in real-time
                 listenToFamilyUpdates(inviteCode)
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Error sync group creation: ${e.message}")
+                Log.e("WorshipViewModel", "Error sync group creation: ${e.message}", e)
+                _notificationFlow.emit("فشل مزامنة المجموعة سحابياً: ${e.localizedMessage ?: e.message} ⚠️")
             }
         }
     }
@@ -1076,8 +1077,8 @@ class WorshipViewModel(application: Application) : AndroidViewModel(application)
 
                 _notificationFlow.emit("تم الانضمام لمجموعة \"$actualGroupName\" بنجاح! 🎉")
             } catch (e: Exception) {
-                Log.e("WorshipViewModel", "Error joining family group: ${e.message}")
-                _notificationFlow.emit("حدث خطأ أثناء الاتصال بالخادم والانضمام للمجموعة ⚠️")
+                Log.e("WorshipViewModel", "Error joining family group: ${e.message}", e)
+                _notificationFlow.emit("فشل الاتصال: ${e.localizedMessage ?: e.message ?: "حدث خطأ أثناء الانضمام للمجموعة"} ⚠️")
             }
         }
     }
